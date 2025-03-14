@@ -76,8 +76,14 @@ app.post('/api/research/upload', upload.single('file'), async (req, res) => {
 
     console.log('Processing uploaded file:', req.file.originalname);
     
+    // Create temp directory if it doesn't exist
+    const tempDir = path.join(__dirname, '../../temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    
     // Create a temporary file path in memory
-    const tempFilePath = path.join(__dirname, '../../temp', `${Date.now()}-${req.file.originalname}`);
+    const tempFilePath = path.join(tempDir, `${Date.now()}-${req.file.originalname}`);
     
     // Write the buffer to a temporary file
     await fs.promises.writeFile(tempFilePath, req.file.buffer);
