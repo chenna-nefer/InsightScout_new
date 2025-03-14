@@ -28,17 +28,22 @@ async function getCompanyData(companyName) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a research assistant focused on finding verified company information. Return only factual data about the specific company asked.'
+                        content: 'You are a research assistant focused on finding verified company information. Return only factual data about founders, co-founders, and CEOs. Include full names, current roles, and any previous roles if available.'
                     },
                     {
                         role: 'user',
-                        content: `Find verified information about the company "${companyName}". Focus only on:
-1. Full company name
+                        content: `Find detailed information about "${companyName}" focusing on:
+1. Full company name (including legal entity)
 2. Official company website
-3. Names of founders and/or CEO with their roles
-4. Year founded (if available)
+3. ALL founders, co-founders, and CEOs (current and past) with:
+   - Full names (first and last name)
+   - Current role
+   - Year they joined/founded
+   - Previous company roles if available
+4. Year founded
+5. Location/headquarters
 
-Do not include LinkedIn URLs or contact information. Only include information you are confident is accurate.`
+Be thorough in finding ALL founders and executives. Include alternate name spellings if found.`
                     }
                 ],
                 max_tokens: 1024,
@@ -48,7 +53,6 @@ Do not include LinkedIn URLs or contact information. Only include information yo
 
         console.log('Perplexity Raw Response:', response.data?.choices?.[0]?.message?.content);
         return response.data?.choices?.[0]?.message?.content;
-
     } catch (error) {
         console.error('Error getting company data:', error.message);
         return null;
@@ -64,22 +68,26 @@ async function extractFounderData(rawData) {
             messages: [
                 {
                     role: "system",
-                    content: "Extract and structure company information from the given text. Return only in JSON format."
+                    content: "Extract and structure company information with high precision. Include all founders and executives mentioned."
                 },
                 {
                     role: "user",
-                    content: `Extract the following from this text and return as JSON:
+                    content: `Extract ALL founders, co-founders, and executives from this text and return as JSON:
 ${rawData}
 
 Return in this exact format:
 {
-    "companyName": "full company name",
+    "companyName": "full legal company name",
     "website": "company website URL",
     "yearFounded": "year if mentioned or null",
+    "location": "headquarters location if mentioned or null",
     "founders": [
         {
             "name": "full name",
-            "role": "current role"
+            "role": "current role",
+            "yearJoined": "year joined/founded if mentioned",
+            "previousRoles": ["role 1", "role 2"],
+            "alternateNames": ["alternate spelling 1", "alternate spelling 2"]
         }
     ]
 }`
@@ -106,34 +114,85 @@ async function findLinkedInProfile(founderName, companyName) {
     try {
         if (!founderName || !companyName) return null;
 
-        const query = `site:linkedin.com/in/ "${founderName}" "${companyName}" (founder OR ceo OR chief)`;
-        console.log('Search query:', query);
+        // Try different search variations
+        const searchQueries = [
+            `site:linkedin.com/in/ "${founderName}" "${companyName}" (founder OR ceo OR chief)`,
+            `site:linkedin.com/in/ "${founderName}" "${companyName}"`,
+            `site:linkedin.com/in/ "${founderName}" (founder OR ceo OR chief)`,
+            // Try with name variations
+            `site:linkedin.com/in/ "${founderName.split(' ').reverse().join(' ')}" "${companyName}"`,
+            // Try with partial company name
+            `site:linkedin.com/in/ "${founderName}" "${companyName.split(' ')[0]}"`
+        ];
 
-        const response = await exa.search(query, {
-            numResults: 3,
-            useAutoprompt: false
-        });
+        for (const query of searchQueries) {
+            console.log('Trying search query:', query);
 
-        if (response?.results) {
-            const linkedInResult = response.results.find(result => {
-                const url = result.url || '';
-                return url.includes('linkedin.com/in/') && !url.includes('/pub/');
+            const response = await exa.search(query, {
+                numResults: 5,
+                useAutoprompt: false
             });
 
-            if (linkedInResult?.url) {
-                const cleanUrl = linkedInResult.url.split('?')[0];
-                console.log('Found LinkedIn URL:', cleanUrl);
-                return cleanUrl;
+            if (response?.results) {
+                // Filter and sort results by relevance
+                const linkedInResults = response.results
+                    .filter(result => {
+                        const url = result.url || '';
+                        return url.includes('linkedin.com/in/') && 
+                               !url.includes('/pub/') &&
+                               !url.includes('/company/');
+                    })
+                    .sort((a, b) => {
+                        // Prioritize results that mention both name and company
+                        const aScore = scoreResult(a, founderName, companyName);
+                        const bScore = scoreResult(b, founderName, companyName);
+                        return bScore - aScore;
+                    });
+
+                if (linkedInResults.length > 0) {
+                    const cleanUrl = linkedInResults[0].url.split('?')[0];
+                    console.log('Found LinkedIn URL:', cleanUrl);
+                    return cleanUrl;
+                }
             }
+
+            // Add delay between queries
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        console.log('No LinkedIn profile found');
+        console.log('No LinkedIn profile found after all attempts');
         return null;
 
     } catch (error) {
         console.error('Error in LinkedIn search:', error.message);
         return null;
     }
+}
+
+// Helper function to score search results
+function scoreResult(result, founderName, companyName) {
+    let score = 0;
+    const content = (result.title + ' ' + result.snippet).toLowerCase();
+    const nameWords = founderName.toLowerCase().split(' ');
+    const companyWords = companyName.toLowerCase().split(' ');
+
+    // Check for name matches
+    nameWords.forEach(word => {
+        if (content.includes(word)) score += 2;
+    });
+
+    // Check for company matches
+    companyWords.forEach(word => {
+        if (content.includes(word)) score += 1;
+    });
+
+    // Bonus points for role mentions
+    if (content.includes('founder')) score += 3;
+    if (content.includes('ceo')) score += 3;
+    if (content.includes('chief')) score += 2;
+    if (content.includes('co-founder')) score += 3;
+
+    return score;
 }
 
 // Add these helper functions for email and phone

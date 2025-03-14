@@ -23,7 +23,7 @@
             
             <div class="or-divider">OR</div>
 
-            <textarea placeholder="Enter company names (one per line)"></textarea>
+            <!-- <textarea placeholder="Enter company names (one per line)"></textarea> -->
             
             <button class="button" id="start-research">Start Research</button>
         </div>
@@ -44,21 +44,27 @@
                 <p>Founders Found: <span id="total-founders">0</span></p>
                 <p>LinkedIn Profiles: <span id="total-linkedin">0</span></p>
             </div>
-            <button class="button" id="download-results">Download Results</button>
-            <button class="button" id="start-new">Start New Research</button>
-            
-            <table class="results-grid">
-                <thead>
-                    <tr>
-                        <th>Company</th>
-                        <th>Founder</th>
-                        <th>LinkedIn</th>
-                    </tr>
-                </thead>
-                <tbody id="results-body">
-                    <!-- Results will be inserted here -->
-                </tbody>
-            </table>
+            <div class="button-group">
+                <button class="button" id="download-results">Download Results</button>
+                <button class="button" id="start-new">Start New Research</button>
+            </div>
+            <div class="table-container">
+                <table class="results-grid">
+                    <thead>
+                        <tr>
+                            <th>Company</th>
+                            <th>Status</th>
+                            <th>Founder</th>
+                            <th>LinkedIn</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-body">
+                        <!-- Results will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
