@@ -306,6 +306,68 @@ app.post('/api/research/cleanup/:jobId', (req, res) => {
   }
 });
 
+// Add new endpoint for loading companies
+app.post('/api/research/load', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+
+        // Create temp directory if it doesn't exist
+        const tempDir = path.join(__dirname, '../../temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+        
+        const tempFilePath = path.join(tempDir, `${Date.now()}-${req.file.originalname}`);
+        await fs.promises.writeFile(tempFilePath, req.file.buffer);
+        
+        const companies = await getCompanyNames(tempFilePath);
+        
+        await fs.promises.unlink(tempFilePath);
+        
+        if (!companies || companies.length === 0) {
+            return res.status(400).json({ error: 'No valid company names found in the file' });
+        }
+
+        res.json({ companies });
+
+    } catch (error) {
+        console.error('Error loading companies:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Update research start endpoint
+app.post('/api/research/start', express.json(), async (req, res) => {
+    try {
+        const { companies } = req.body;
+        
+        if (!companies || !Array.isArray(companies) || companies.length === 0) {
+            return res.status(400).json({ error: 'No companies provided' });
+        }
+
+        const jobId = Date.now().toString();
+        
+        jobs.set(jobId, {
+            status: 'processing',
+            progress: 0,
+            total: companies.length,
+            results: [],
+            currentCompany: '',
+            lastUpdated: Date.now()
+        });
+        
+        // Start processing in background
+        processCompanies(companies, jobId);
+        
+        res.json({ jobId });
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Helper functions
 async function processCompanies(companies, jobId) {
   const results = [];

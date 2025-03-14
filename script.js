@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // API Configuration
     const API_BASE_URL = 'https://insightscout.onrender.com';
+    // const API_BASE_URL = 'http://localhost:7501';
     
     // DOM Elements
     const fileInput = document.getElementById('file-input');
@@ -23,6 +24,21 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentResults = [];
     let currentJobId = null;
 
+    // Get existing buttons and elements
+    const loadDataBtn = document.createElement('button');
+    loadDataBtn.className = 'button';
+    loadDataBtn.id = 'load-data';
+    loadDataBtn.textContent = 'Load Companies';
+    
+    // Insert load button before start research button
+    startResearchBtn.parentNode.insertBefore(loadDataBtn, startResearchBtn);
+    
+    // Initially hide the start research button
+    startResearchBtn.style.display = 'none';
+
+    // Store companies data
+    let loadedCompanies = [];
+
     // File Upload Handling
     fileInput.addEventListener('change', handleFileUpload);
     
@@ -32,7 +48,8 @@ document.addEventListener('DOMContentLoaded', function() {
     fileUploadArea.addEventListener('drop', handleFileDrop);
 
     // Button Click Handlers
-    startResearchBtn.addEventListener('click', startResearch);
+    loadDataBtn.addEventListener('click', () => fileInput.click());
+    startResearchBtn.addEventListener('click', startResearchProcess);
     cancelResearchBtn.addEventListener('click', cancelResearch);
     downloadResultsBtn.addEventListener('click', downloadResults);
     startNewBtn.addEventListener('click', startNew);
@@ -41,7 +58,8 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleFileUpload(e) {
         const file = e.target.files[0];
         if (file) {
-            validateAndProcessFile(file);
+            e.preventDefault();
+            validateAndLoadFile(file);
         }
     }
 
@@ -73,30 +91,107 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    function validateAndLoadFile(file) {
+        const validExtensions = ['.xlsx', '.csv'];
+        const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+        
+        if (validExtensions.includes(fileExtension)) {
+            loadCompaniesData(file);
+        } else {
+            alert('Please upload an Excel (.xlsx) or CSV (.csv) file');
+        }
+    }
+
     // Research Process Functions
-    async function startResearch(file) {
+    async function loadCompaniesData(file) {
         try {
-            // Reset results but keep sections visible
-            currentResults = [];
-            resultsBody.innerHTML = '';
-            
-            // Show progress and results sections, hide input
-            inputSection.style.display = 'none';
-            progressSection.style.display = 'block';
-            resultsSection.style.display = 'block';
-            
-            // Reset progress bar
-            progressBarFill.style.width = '0%';
-            progressBarFill.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--secondary-color');
-            currentCompanySpan.textContent = 'Starting research...';
-            
             const formData = new FormData();
             formData.append('file', file);
 
-            console.log('Starting research with file:', file.name);
-            const response = await fetch(`${API_BASE_URL}/api/research/upload`, {
+            const response = await fetch(`${API_BASE_URL}/api/research/load`, {
                 method: 'POST',
                 body: formData
+            });
+
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to load companies');
+            }
+
+            loadedCompanies = data.companies;
+            
+            // Update table with companies
+            updateTableWithCompanies(data.companies);
+            
+            // Show start research button, hide load button
+            startResearchBtn.style.display = 'block';
+            loadDataBtn.style.display = 'none';
+
+            // Show results section with loaded data
+            resultsSection.style.display = 'block';
+            
+            return data.companies;
+
+        } catch (error) {
+            console.error('Error loading companies:', error);
+            handleError(error);
+        }
+    }
+
+    function updateTableWithCompanies(companies) {
+        // Clear existing table content
+        resultsBody.innerHTML = '';
+        
+        // Update table headers
+        const headerRow = document.querySelector('thead tr');
+        headerRow.innerHTML = `
+            <th>Company</th>
+            <th>Status</th>
+            <th>Founder</th>
+            <th>LinkedIn</th>
+            <th>Email</th>
+            <th>Phone</th>
+        `;
+        
+        // Add company rows
+        companies.forEach(companyName => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${companyName}</td>
+                <td><span class="status-text">Pending</span></td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+            `;
+            resultsBody.appendChild(row);
+        });
+
+        // Update summary
+        totalCompaniesSpan.textContent = companies.length;
+    }
+
+    async function startResearchProcess() {
+        try {
+            if (!loadedCompanies.length) {
+                throw new Error('No companies loaded. Please load companies first.');
+            }
+
+            // Show progress section
+            progressSection.style.display = 'block';
+            startResearchBtn.style.display = 'none';
+            
+            // Reset progress bar
+            progressBarFill.style.width = '0%';
+            currentCompanySpan.textContent = 'Starting research...';
+
+            const response = await fetch(`${API_BASE_URL}/api/research/start`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ companies: loadedCompanies })
             });
 
             const data = await response.json();
@@ -105,55 +200,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(data.error || 'Failed to start research');
             }
 
-            console.log('Server response:', data);
-            
-            if (!data.jobId) {
-                throw new Error('No job ID received from server');
-            }
-
-            if (!data.companies || !Array.isArray(data.companies) || data.companies.length === 0) {
-                throw new Error('No valid companies found in file');
-            }
-
             currentJobId = data.jobId;
             
-            // Update table structure to include all columns
-            const headerRow = document.querySelector('thead tr');
-            headerRow.innerHTML = `
-                <th>Company</th>
-                <th>Founder</th>
-                <th>LinkedIn</th>
-                <th>Email</th>
-                <th>Phone</th>
-            `;
-            
-            // Pre-populate table with company names
-            console.log('Creating table with companies:', data.companies);
-            data.companies.forEach(companyName => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${companyName}</td>
-                    <td>-</td>
-                    <td>-</td>
-                    <td>-</td>
-                    <td>-</td>
-                `;
-                resultsBody.appendChild(row);
-            });
-
-            // Update summary with total companies
-            totalCompaniesSpan.textContent = data.companies.length;
-            
-            // Start tracking progress
+            // Start progress tracking
             startProgressTracking(data.jobId);
 
         } catch (error) {
             console.error('Error starting research:', error);
-            // Keep results section visible on error
-            progressSection.style.display = 'none';
-            inputSection.style.display = 'block';
-            resultsSection.style.display = 'block';
-            alert(error.message || 'Failed to start research. Please try again.');
+            handleError(error);
         }
     }
 
@@ -188,259 +242,84 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function startProgressTracking(jobId) {
-        console.log('Starting progress tracking for job:', jobId);
-        const processedCompanies = new Set();
-        let previousCompany = null;
-        let errorCount = 0;
-        const MAX_ERRORS = 3;
-        
         const interval = setInterval(async () => {
             try {
                 const response = await fetch(`${API_BASE_URL}/api/research/status/${jobId}`);
-                if (!response.ok) {
-                    throw new Error('Failed to get status');
-                }
-
-                // Reset error count on successful request
-                errorCount = 0;
-
                 const data = await response.json();
-                console.log('Progress update:', data);
-                
+
+                if (!response.ok) throw new Error('Failed to get status');
+
                 // Update progress bar
                 progressBarFill.style.width = `${data.progress}%`;
-                
-                // Clear loading state from previous company if we've moved to a new one
-                if (previousCompany && previousCompany !== data.currentCompany) {
-                    const rows = resultsBody.getElementsByTagName('tr');
-                    for (let row of rows) {
-                        if (row.cells[0].textContent === previousCompany) {
-                            if (row.cells[1].textContent === 'Researching...') {
-                                row.cells[1].textContent = 'N/A';
-                            }
-                            if (row.cells[2].textContent === 'Searching...') {
-                                row.cells[2].textContent = 'Not found';
-                            }
-                        }
-                    }
-                }
-                
-                // Update current company being processed
+
+                // Update current company status
                 if (data.currentCompany) {
                     currentCompanySpan.textContent = data.currentCompany;
-                    previousCompany = data.currentCompany;
-                    // Only update loading state if company hasn't been processed yet
-                    if (!processedCompanies.has(data.currentCompany)) {
-                        const rows = resultsBody.getElementsByTagName('tr');
-                        for (let row of rows) {
-                            if (row.cells[0].textContent === data.currentCompany) {
-                                // Clear any existing rows for this company
-                                while (row.nextElementSibling && 
-                                      row.nextElementSibling.cells[0].textContent === data.currentCompany) {
-                                    resultsBody.removeChild(row.nextElementSibling);
-                                }
-                                row.cells[1].innerHTML = '<span class="loading-text">Researching...</span>';
-                                row.cells[2].innerHTML = '<span class="loading-text">Searching...</span>';
-                                break;
-                            }
-                        }
-                    }
+                    updateCompanyStatus(data.currentCompany, 'Researching...');
                 }
 
-                // Update results if new data is available
-                if (data.results && data.results.length > currentResults.length) {
-                    console.log('New results available:', data.results.length - currentResults.length);
-                    const newResults = data.results.slice(currentResults.length);
-                    await updateResultsTable(newResults);
-                    // Mark companies as processed
-                    newResults.forEach(result => {
-                        if (result && result.companyName) {
-                            processedCompanies.add(result.companyName);
-                        }
-                    });
-                    currentResults = data.results;
-                    updateSummary(data.results);
+                // Update results
+                if (data.results && data.results.length > 0) {
+                    updateCompanyResults(data.results);
                 }
 
+                // Handle completion
                 if (data.status === 'completed') {
                     clearInterval(interval);
-                    console.log('Research completed');
-                    // Clear any remaining loading states
-                    const rows = resultsBody.getElementsByTagName('tr');
-                    for (let row of rows) {
-                        if (row.cells[1].textContent === 'Researching...') {
-                            row.cells[1].textContent = 'N/A';
-                        }
-                        if (row.cells[2].textContent === 'Searching...') {
-                            row.cells[2].textContent = 'Not found';
-                        }
-                    }
-                    // Show completion message
-                    currentCompanySpan.textContent = 'Research completed!';
-                    progressBarFill.style.backgroundColor = '#4CAF50';
-                    progressSection.style.display = 'none';
-                    inputSection.style.display = 'block';
-                    resultsSection.style.display = 'block'; // Keep results visible
-                } else if (data.status === 'cancelled' || data.status === 'failed') {
-                    clearInterval(interval);
-                    // Clear any remaining loading states
-                    const rows = resultsBody.getElementsByTagName('tr');
-                    for (let row of rows) {
-                        if (row.cells[1].textContent === 'Researching...') {
-                            row.cells[1].textContent = 'N/A';
-                        }
-                        if (row.cells[2].textContent === 'Searching...') {
-                            row.cells[2].textContent = 'Not found';
-                        }
-                    }
-                    // Update UI
-                    progressBarFill.style.backgroundColor = '#ff4444';
-                    currentCompanySpan.textContent = data.status === 'cancelled' ? 'Research cancelled' : 'Research failed';
-                    if (data.status === 'failed') alert('Research failed. Please try again.');
-                    progressSection.style.display = 'none';
-                    inputSection.style.display = 'block';
-                    resultsSection.style.display = 'block'; // Keep results visible
+                    handleCompletion();
                 }
+
             } catch (error) {
                 console.error('Error tracking progress:', error);
-                errorCount++;
-                
-                if (errorCount >= MAX_ERRORS) {
-                    clearInterval(interval);
-                    // Keep results visible even on error
-                    progressSection.style.display = 'none';
-                    inputSection.style.display = 'block';
-                    resultsSection.style.display = 'block';
-                    alert('Failed to track progress. Please try again.');
-                }
             }
         }, 2000);
     }
 
-    async function updateResultsTable(newResults) {
-        for (const result of newResults) {
-            if (result) {
-                // Find the first row for this company
-                const rows = resultsBody.getElementsByTagName('tr');
-                let firstCompanyRow = null;
-                for (let row of rows) {
-                    if (row.cells[0].textContent === result.companyName) {
-                        firstCompanyRow = row;
-                        break;
-                    }
-                }
-
-                if (firstCompanyRow) {
-                    // Remove any existing rows for this company
-                    while (firstCompanyRow.nextElementSibling && 
-                           firstCompanyRow.nextElementSibling.cells[0].textContent === result.companyName) {
-                        resultsBody.removeChild(firstCompanyRow.nextElementSibling);
-                    }
-
-                    // If no founder data found, mark as NOT FOUND
-                    if (!result.foundersData || result.foundersData.length === 0) {
-                        firstCompanyRow.innerHTML = `
-                            <td>${result.companyName}</td>
-                            <td>NOT FOUND</td>
-                            <td>NOT FOUND</td>
-                            <td>NOT FOUND</td>
-                            <td>NOT FOUND</td>
-                        `;
-                        continue;
-                    }
-
-                    // Update or create rows for each founder
-                    for (const [index, founder] of result.foundersData.entries()) {
-                        let emailStatus = 'NOT FOUND';
-                        let phoneStatus = 'NOT FOUND';
-
-                        if (founder.linkedinUrl) {
-                            try {
-                                // Show loading state for contact details
-                                if (index === 0) {
-                                    firstCompanyRow.cells[3].textContent = 'Searching...';
-                                    firstCompanyRow.cells[4].textContent = 'Searching...';
-                                }
-
-                                // Get email using Prospeo
-                                const emailResponse = await fetch(`${API_BASE_URL}/api/research/email`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json'
-                                    },
-                                    body: JSON.stringify({ url: founder.linkedinUrl })
-                                });
-
-                                const emailData = await emailResponse.json();
-                                emailStatus = emailData.email || 'Not Found';
-
-                                // Get phone using Prospeo
-                                const phoneResponse = await fetch(`${API_BASE_URL}/api/research/phone`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json'
-                                    },
-                                    body: JSON.stringify({ url: founder.linkedinUrl })
-                                });
-
-                                const phoneData = await phoneResponse.json();
-                                phoneStatus = phoneData.phone || 'Not Found';
-
-                            } catch (error) {
-                                console.error('Error fetching contact details:', error);
-                                if (error.message.includes('Out of Prospeo credits')) {
-                                    emailStatus = 'Credit limit reached';
-                                    phoneStatus = 'Credit limit reached';
-                                } else {
-                                    emailStatus = 'Not Found';
-                                    phoneStatus = 'Not Found';
-                                }
-                            }
-                        }
-
-                        if (index === 0) {
-                            // Update the first row
-                            firstCompanyRow.innerHTML = `
-                                <td>${result.companyName}</td>
-                                <td>${founder.name || 'NOT FOUND'}</td>
-                                <td>${founder.linkedinUrl ? 
-                                    `<a href="${founder.linkedinUrl}" target="_blank">View Profile</a>` : 
-                                    'NOT FOUND'}</td>
-                                <td>${emailStatus}</td>
-                                <td>${phoneStatus}</td>
-                            `;
-                        } else {
-                            // Create additional rows for other founders
-                            const newRow = document.createElement('tr');
-                            newRow.innerHTML = `
-                                <td>${result.companyName}</td>
-                                <td>${founder.name || 'NOT FOUND'}</td>
-                                <td>${founder.linkedinUrl ? 
-                                    `<a href="${founder.linkedinUrl}" target="_blank">View Profile</a>` : 
-                                    'NOT FOUND'}</td>
-                                <td>${emailStatus}</td>
-                                <td>${phoneStatus}</td>
-                            `;
-                            firstCompanyRow.parentNode.insertBefore(newRow, firstCompanyRow.nextElementSibling);
-                        }
-                    }
-                } else {
-                    console.log('No matching row found for company:', result.companyName);
-                }
+    function updateCompanyStatus(companyName, status) {
+        const rows = resultsBody.getElementsByTagName('tr');
+        for (let row of rows) {
+            if (row.cells[0].textContent === companyName) {
+                row.cells[1].innerHTML = `<span class="status-text">${status}</span>`;
+                break;
             }
         }
     }
 
-    function updateSummary(results) {
-        if (!results) return;
-        
-        totalCompaniesSpan.textContent = results.length;
-        const totalFounders = results.reduce((sum, r) => 
-            sum + (r.foundersData ? r.foundersData.length : 0), 0);
-        totalFoundersSpan.textContent = totalFounders;
-        const totalLinkedin = results.reduce((sum, r) => 
-            sum + (r.foundersData ? r.foundersData.filter(f => f.linkedinUrl).length : 0), 0);
-        totalLinkedinSpan.textContent = totalLinkedin;
+    function updateCompanyResults(results) {
+        results.forEach(result => {
+            if (!result.companyName) return;
+
+            const rows = resultsBody.getElementsByTagName('tr');
+            for (let row of rows) {
+                if (row.cells[0].textContent === result.companyName) {
+                    if (result.foundersData && result.foundersData.length > 0) {
+                        const founder = result.foundersData[0];
+                        row.cells[2].textContent = founder.name || 'Not Found';
+                        row.cells[3].innerHTML = founder.linkedinUrl && founder.linkedinUrl !== 'Not Found' ? 
+                            `<a href="${founder.linkedinUrl}" target="_blank">View Profile</a>` : 
+                            'Not Found';
+                        row.cells[4].textContent = founder.email || 'Not Found';
+                        row.cells[5].textContent = founder.phone || 'Not Found';
+                        row.cells[1].innerHTML = '<span class="status-text completed">Completed</span>';
+                    } else {
+                        row.cells[2].textContent = 'Not Found';
+                        row.cells[3].textContent = 'Not Found';
+                        row.cells[4].textContent = 'Not Found';
+                        row.cells[5].textContent = 'Not Found';
+                        row.cells[1].innerHTML = '<span class="status-text">No Results</span>';
+                    }
+                    break;
+                }
+            }
+        });
+    }
+
+    function handleCompletion() {
+        progressSection.style.display = 'none';
+        inputSection.style.display = 'block';
+        resultsSection.style.display = 'block';
+        currentCompanySpan.textContent = 'Research completed!';
+        progressBarFill.style.backgroundColor = '#4CAF50';
     }
 
     async function downloadResults() {
@@ -507,24 +386,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function startNew() {
-        // Reset file input
+        // Reset file input but keep the results visible
         fileInput.value = '';
         textarea.value = '';
         
-        // If we have results, keep them visible
-        if (currentResults && currentResults.length > 0) {
-            inputSection.style.display = 'none';
-            resultsSection.style.display = 'block';
-            progressSection.style.display = 'none';
-        } else {
-            // Only reset everything if no results
+        // Show input section for new upload while keeping results
+        inputSection.style.display = 'block';
+        progressSection.style.display = 'none';
+        
+        // Only hide results if there are none
+        if (!currentResults || currentResults.length === 0) {
             resultsSection.style.display = 'none';
-            inputSection.style.display = 'block';
-            progressSection.style.display = 'none';
-            progressBarFill.style.width = '0%';
-            currentCompanySpan.textContent = '-';
             resultsBody.innerHTML = '';
-            currentResults = [];
         }
     }
+
+    // Event Listeners
+    loadDataBtn.addEventListener('click', () => fileInput.click());
 });

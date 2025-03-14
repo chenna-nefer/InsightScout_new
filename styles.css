@@ -116,8 +116,14 @@ textarea {
 }
 
 .status-text {
-    color: var(--secondary-color);
-    margin-bottom: 1rem;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+.status-text.completed {
+    background-color: #4CAF50;
+    color: white;
 }
 
 .results-section {
@@ -171,4 +177,12 @@ textarea {
     .input-section, .progress-section, .results-section {
         padding: 1rem;
     }
+}
+
+#start-research {
+    background-color: #4CAF50;
+}
+
+#load-data {
+    background-color: var(--primary-color);
 }
