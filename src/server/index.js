@@ -30,9 +30,15 @@ const port = process.env.PORT || 7501;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5500', 'http://127.0.0.1:5500'], // Add your frontend URLs
+  origin: [
+    'http://localhost:5500', 
+    'http://127.0.0.1:5500',
+    'https://insightscout-new.onrender.com',
+    'https://insightscout-new.onrender.com/'
+  ],
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type'],
+  credentials: true
 }));
 app.use(express.json());
 
