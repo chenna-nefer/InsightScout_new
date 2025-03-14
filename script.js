@@ -318,7 +318,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function updateResultsTable(newResults) {
-        console.log('Updating results table with:', newResults);
         for (const result of newResults) {
             if (result) {
                 // Find the first row for this company
@@ -332,8 +331,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if (firstCompanyRow) {
-                    console.log('Found matching row for company:', result.companyName);
-                    
                     // Remove any existing rows for this company
                     while (firstCompanyRow.nextElementSibling && 
                            firstCompanyRow.nextElementSibling.cells[0].textContent === result.companyName) {

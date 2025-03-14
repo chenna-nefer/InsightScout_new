@@ -156,9 +156,84 @@ export async function researchCompany(companyName) {
     }
 
     // 1. Get founder details from Perplexity
-    const { founderInfo } = await getFounderDetails(companyName);
+    let { founderInfo } = await getFounderDetails(companyName);
+    
+    // 2. If no founder info found, try Crunchbase
     if (!founderInfo) {
-      console.log('❌ No founder information found');
+      console.log('No founder info from Perplexity, trying Crunchbase...');
+      const crunchbaseData = await searchCrunchbase(companyName);
+      
+      if (crunchbaseData) {
+        // Use Perplexity to extract structured data from Crunchbase content
+        const crunchbaseResponse = await axios({
+          method: 'post',
+          url: 'https://api.perplexity.ai/chat/completions',
+          headers: {
+            'Authorization': `Bearer ${process.env.PERPLEXITY_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          data: {
+            model: 'sonar',
+            messages: [
+              {
+                role: 'system',
+                content: 'Extract founder and company information from the given text in the specified format.'
+              },
+              {
+                role: 'user',
+                content: `Extract founder and company information from this Crunchbase data and format it as specified:\n${crunchbaseData}`
+              }
+            ],
+            max_tokens: 250,
+            temperature: 0.1
+          }
+        });
+
+        if (crunchbaseResponse.data?.choices?.[0]?.message?.content) {
+          founderInfo = crunchbaseResponse.data.choices[0].message.content.trim();
+        }
+      }
+    }
+
+    // 3. If still no founder info, try company website
+    if (!founderInfo) {
+      console.log('No founder info from Crunchbase, trying company website...');
+      const websiteInfo = await getCompanyWebsiteInfo(companyName);
+      
+      if (websiteInfo) {
+        // Use Perplexity to extract structured data from website content
+        const websiteResponse = await axios({
+          method: 'post',
+          url: 'https://api.perplexity.ai/chat/completions',
+          headers: {
+            'Authorization': `Bearer ${process.env.PERPLEXITY_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          data: {
+            model: 'sonar',
+            messages: [
+              {
+                role: 'system',
+                content: 'Extract founder and company information from the given text in the specified format.'
+              },
+              {
+                role: 'user',
+                content: `Extract founder and company information from this website content and format it as specified:\n${websiteInfo.content}`
+              }
+            ],
+            max_tokens: 250,
+            temperature: 0.1
+          }
+        });
+
+        if (websiteResponse.data?.choices?.[0]?.message?.content) {
+          founderInfo = websiteResponse.data.choices[0].message.content.trim();
+        }
+      }
+    }
+
+    if (!founderInfo) {
+      console.log('❌ No founder information found from any source');
       processedCompanies.add(companyName);
       return {
         companyName,
@@ -166,8 +241,8 @@ export async function researchCompany(companyName) {
       };
     }
 
-    // 2. Extract founder names and create structured data
-    const founders = extractStructuredFounderData(founderInfo);
+    // Extract structured data and continue with existing logic
+    const { founders, company_info } = extractStructuredFounderData(founderInfo);
     if (!founders || founders.length === 0) {
       console.log('❌ No valid founder data extracted');
       processedCompanies.add(companyName);
@@ -177,12 +252,11 @@ export async function researchCompany(companyName) {
       };
     }
 
-    // 3. Process each founder
+    // Process each founder
     const foundersData = [];
-    const processedFounders = new Set(); // Track processed founders by name
+    const processedFounders = new Set();
     
     for (const founder of founders) {
-      // Skip if we've already processed this founder
       if (processedFounders.has(founder.name)) {
         console.log(`Skipping duplicate founder: ${founder.name}`);
         continue;
@@ -194,16 +268,15 @@ export async function researchCompany(companyName) {
       // Find LinkedIn profile
       const linkedinUrl = await getLinkedInProfile(founder.name, companyName);
       
-      // Initialize founder data
       const founderData = {
         name: founder.name,
-        role: founder.role || 'Founder', // Use role from structured data
+        role: founder.role || 'Founder',
+        background: founder.background || '',
         linkedinUrl: linkedinUrl || '',
         email: '',
         phone: ''
       };
 
-      // If we have a LinkedIn URL, try to get email and phone
       if (linkedinUrl) {
         console.log('✓ Found LinkedIn profile');
         
@@ -256,7 +329,8 @@ export async function researchCompany(companyName) {
 
     return {
       companyName,
-      foundersData
+      foundersData,
+      companyInfo: company_info
     };
 
   } catch (error) {
@@ -285,18 +359,26 @@ async function getFounderDetails(companyName) {
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful assistant that provides accurate information about company founders and CEOs. Return ONLY verified founder/CEO names in a structured format. Each name must be on a new line with their role.'
+            content: `You are a precise company research assistant that provides verified information about company founders and executives. Focus on finding:
+1. Current founders and co-founders
+2. Current CEO if different from founders
+3. Year company was founded
+4. Company headquarters location
+Return information in this exact format:
+Founder: FirstName LastName (Role, Year joined)
+Co-Founder: FirstName LastName (Role, Year joined)
+CEO: FirstName LastName (Since Year)
+Founded: Year
+Location: City, Country
+
+Only include verified information from reliable sources. If information cannot be verified, respond with "No verified information found."`
           },
           {
             role: 'user',
-            content: `Find the current founder(s) or CEO of ${companyName}. Format each person exactly like this:
-Founder: FirstName LastName
-CEO: FirstName LastName
-
-Only include people where you are confident of both their role and full name. If no verified information is found, respond with "No verified founder information found."`
+            content: `Research ${companyName} and provide founder, CEO, and company information in the specified format. Include only verified information from reliable sources.`
           }
         ],
-        max_tokens: 150,
+        max_tokens: 250,
         temperature: 0.1,
         top_p: 0.9
       }
@@ -307,42 +389,44 @@ Only include people where you are confident of both their role and full name. If
       console.log('Raw founder information:', founderInfo);
       
       // If explicitly states no verified information
-      if (founderInfo.toLowerCase().includes('no verified founder')) {
+      if (founderInfo.toLowerCase().includes('no verified')) {
         console.log('No verified founder information found');
         return { founderInfo: '', citations: [] };
       }
 
-      // Process each line
+      // Process and validate the information
       const lines = founderInfo.split('\n')
         .map(line => line.trim())
         .filter(line => line.length > 0);
       
       // Validate each line matches our format
       const validLines = lines.filter(line => {
-        const match = line.match(/^(Founder|CEO):\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)$/);
-        if (match) {
-          const [, role, name] = match;
-          // Ensure name has at least two parts and follows capitalization
-          const nameParts = name.split(/\s+/);
-          return nameParts.length >= 2 && 
-                 nameParts.every(part => /^[A-Z][a-z]+$/.test(part));
-        }
-        return false;
+        const roleMatch = line.match(/^(Founder|Co-Founder|CEO|Founded|Location):/);
+        if (!roleMatch) return false;
+
+        if (roleMatch[1] === 'Founded' || roleMatch[1] === 'Location') return true;
+
+        const nameMatch = line.match(/^(?:Founder|Co-Founder|CEO):\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/);
+        if (!nameMatch) return false;
+
+        const nameParts = nameMatch[1].split(/\s+/);
+        return nameParts.length >= 2 && 
+               nameParts.every(part => /^[A-Z][a-z]+$/.test(part));
       });
 
       if (validLines.length > 0) {
-        console.log('Validated founder information:', validLines.join('\n'));
+        console.log('Validated information:', validLines.join('\n'));
         return {
           founderInfo: validLines.join('\n'),
           citations: response.data.citations || []
         };
       }
       
-      console.log('No valid founder information found after validation');
+      console.log('No valid information found after validation');
       return { founderInfo: '', citations: [] };
     }
 
-    console.log('No founder information in response');
+    console.log('No information in response');
     return { founderInfo: '', citations: [] };
 
   } catch (error) {
@@ -364,26 +448,42 @@ function extractStructuredFounderData(founderInfo) {
   try {
     if (!founderInfo) {
       console.log('No founder info to extract');
-      return [];
+      return {
+        founders: [],
+        company_info: {
+          founding_year: '',
+          location: ''
+        }
+      };
     }
 
-    // Split by newlines and process each line
     const lines = founderInfo.split('\n').map(line => line.trim()).filter(Boolean);
-    
-    // Use a Map to track unique founders by name
     const foundersMap = new Map();
+    let companyInfo = {
+      founding_year: '',
+      location: ''
+    };
     
     for (const line of lines) {
-      // Extract role and name from the line
-      const match = line.match(/^(Founder|CEO):\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)$/);
+      if (line.startsWith('Founded:')) {
+        companyInfo.founding_year = line.replace('Founded:', '').trim();
+        continue;
+      }
+      
+      if (line.startsWith('Location:')) {
+        companyInfo.location = line.replace('Location:', '').trim();
+        continue;
+      }
+      
+      const match = line.match(/^(Founder|Co-Founder|CEO):\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s+\((.*?)\))?$/);
       if (match) {
-        const [, role, name] = match;
+        const [, role, name, details] = match;
         
-        // Skip if we already have this person (avoid duplicates)
         if (!foundersMap.has(name)) {
           foundersMap.set(name, {
             name,
-            role,
+            role: role === 'CEO' ? 'CEO' : 'Founder',
+            background: details || '',
             linkedinUrl: null,
             email: null,
             phone: null
@@ -392,14 +492,24 @@ function extractStructuredFounderData(founderInfo) {
       }
     }
 
-    // Convert Map to array
     const founders = Array.from(foundersMap.values());
     console.log('Extracted founders:', founders);
-    return founders;
+    console.log('Company info:', companyInfo);
+    
+    return {
+      founders,
+      company_info: companyInfo
+    };
 
   } catch (error) {
     console.error('Error extracting founder data:', error.message);
-    return [];
+    return {
+      founders: [],
+      company_info: {
+        founding_year: '',
+        location: ''
+      }
+    };
   }
 }
 
@@ -535,4 +645,103 @@ export async function saveToExcel(results) {
     console.error('❌ Error saving to Excel:', error);
     throw error;
   }
+}
+
+// Add new function to get company website and analyze its content
+async function getCompanyWebsiteInfo(companyName) {
+  console.log('\n=== Getting Company Website Info ===');
+  try {
+    // First, find the company website
+    const websiteQuery = `${companyName} company official website -site:linkedin.com -site:crunchbase.com -site:bloomberg.com`;
+    const websiteResults = await exa.search(websiteQuery, {
+      numResults: 3,
+      useAutoprompt: false,
+      type: 'keyword'
+    });
+
+    if (!websiteResults?.results?.length) {
+      return null;
+    }
+
+    // Look for official website in results
+    const officialSite = websiteResults.results.find(result => {
+      const url = result.url.toLowerCase();
+      return !url.includes('linkedin.com') && 
+             !url.includes('crunchbase.com') && 
+             !url.includes('bloomberg.com') &&
+             !url.includes('facebook.com') &&
+             !url.includes('twitter.com');
+    });
+
+    if (!officialSite) {
+      return null;
+    }
+
+    console.log('Found company website:', officialSite.url);
+
+    // Search for leadership/team/about page content
+    const aboutQuery = `site:${officialSite.url} (about OR team OR leadership OR management OR founders) (founder OR ceo OR executive)`;
+    const aboutResults = await exa.search(aboutQuery, {
+      numResults: 5,
+      useAutoprompt: false,
+      type: 'keyword'
+    });
+
+    if (!aboutResults?.results?.length) {
+      return null;
+    }
+
+    return {
+      website: officialSite.url,
+      content: aboutResults.results.map(r => r.text).join('\n')
+    };
+  } catch (error) {
+    console.error('Error getting company website info:', error);
+    return null;
+  }
+}
+
+// Add function to search Crunchbase
+async function searchCrunchbase(companyName) {
+  console.log('\n=== Searching Crunchbase ===');
+  try {
+    const query = `site:crunchbase.com/organization ${companyName} (founder OR ceo)`;
+    const results = await exa.search(query, {
+      numResults: 2,
+      useAutoprompt: false,
+      type: 'keyword'
+    });
+
+    if (!results?.results?.length) {
+      return null;
+    }
+
+    const crunchbaseData = results.results[0];
+    console.log('Found Crunchbase data:', crunchbaseData.url);
+    return crunchbaseData.text;
+  } catch (error) {
+    console.error('Error searching Crunchbase:', error);
+    return null;
+  }
+}
+
+async function verifyFounder(companyName, potentialFounder) {
+  // Website search
+  const websiteResults = await exa.search(
+    `${companyName} ${potentialFounder} founder OR CEO`,
+    { numResults: 3, useAutoprompt: false, type: 'keyword' }
+  );
+
+  // News search
+  const newsResults = await exa.search(
+    `${companyName} ${potentialFounder} founder OR CEO site:linkedin.com OR site:crunchbase.com`,
+    { numResults: 3, useAutoprompt: false, type: 'keyword' }
+  );
+}
+
+async function verifyLinkedInProfile(url, founderName, companyName) {
+  const response = await exa.search(
+    `${founderName} ${companyName} site:linkedin.com/in/`,
+    { numResults: 1 }
+  );
 } 
