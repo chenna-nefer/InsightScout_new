@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: insightscout-api
+    env: node
+    buildCommand: npm install
+    startCommand: node src/server/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: EXA_API_KEY
+        sync: false
+      - key: PROSPEO_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true 

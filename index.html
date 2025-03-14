@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CompanyScope - Company Research Tool</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>CompanyScope</h1>
+        <p>Research Companies & Founders Instantly</p>
+    </header>
+
+    <div class="container">
+        <div class="input-section">
+            <h2>Start Your Research</h2>
+            <div class="file-upload" onclick="document.getElementById('file-input').click()">
+                <input type="file" id="file-input" hidden accept=".xlsx,.csv">
+                <p>Drop your Excel/CSV file here</p>
+                <p>or click to browse</p>
+            </div>
+            
+            <div class="or-divider">OR</div>
+
+            <textarea placeholder="Enter company names (one per line)"></textarea>
+            
+            <button class="button" id="start-research">Start Research</button>
+        </div>
+
+        <div class="progress-section" id="progress-section">
+            <h2>Research in Progress</h2>
+            <p class="status-text">Processing: <span id="current-company">-</span></p>
+            <div class="progress-bar">
+                <div class="progress-bar-fill" id="progress-bar-fill"></div>
+            </div>
+            <button class="button" id="cancel-research">Cancel</button>
+        </div>
+
+        <div class="results-section" id="results-section">
+            <h2>Research Results</h2>
+            <div class="results-summary">
+                <p>Total Companies: <span id="total-companies">0</span></p>
+                <p>Founders Found: <span id="total-founders">0</span></p>
+                <p>LinkedIn Profiles: <span id="total-linkedin">0</span></p>
+            </div>
+            <button class="button" id="download-results">Download Results</button>
+            <button class="button" id="start-new">Start New Research</button>
+            
+            <table class="results-grid">
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Founder</th>
+                        <th>LinkedIn</th>
+                    </tr>
+                </thead>
+                <tbody id="results-body">
+                    <!-- Results will be inserted here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
