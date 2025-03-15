@@ -242,3 +242,36 @@ textarea {
 .results-section::-webkit-scrollbar-thumb:hover {
     background: #555;
 }
+
+.company-input {
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+}
+
+.company-input input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid var(--secondary-color);
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+#search-company {
+    background-color: var(--primary-color);
+}
+
+/* Add these styles for multiple founder rows */
+.results-grid tr:not(:first-child) td:empty {
+    border-top: none;
+    background: transparent;
+}
+
+.results-grid tr td:first-child {
+    border-right: 1px solid #eee;
+}
+
+/* Add visual separation between different companies */
+.results-grid tr:not(:first-child) td:first-child:empty {
+    border-top: none;
+}

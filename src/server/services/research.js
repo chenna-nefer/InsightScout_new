@@ -15,182 +15,185 @@ const groqClient = new Groq();
 // 1. First, get basic company info from Perplexity
 async function getCompanyData(companyName) {
     try {
-        console.log(`Getting data for company: ${companyName}`);
-        const response = await axios({
-            method: 'post',
-            url: 'https://api.perplexity.ai/chat/completions',
+        const options = {
+            method: 'POST',
             headers: {
                 'Authorization': `Bearer ${process.env.PERPLEXITY_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            data: {
-                model: 'sonar',
+            body: JSON.stringify({
+                model: "sonar",
                 messages: [
                     {
-                        role: 'system',
-                        content: 'You are a research assistant focused on finding verified company information. Return only factual data about founders, co-founders, and CEOs. Include full names, current roles, and any previous roles if available.'
+                        role: "system",
+                        content: "Be precise and concise. Return information in a clear format."
                     },
                     {
-                        role: 'user',
-                        content: `Find detailed information about "${companyName}" focusing on:
-1. Full company name (including legal entity)
-2. Official company website
-3. ALL founders, co-founders, and CEOs (current and past) with:
-   - Full names (first and last name)
-   - Current role
-   - Year they joined/founded
-   - Previous company roles if available
-4. Year founded
-5. Location/headquarters
-
-Be thorough in finding ALL founders and executives. Include alternate name spellings if found.`
+                        role: "user",
+                        content: `Please provide detailed information about ${companyName}, specifically:
+                            1. Full company name
+                            2. Website
+                            3. ALL founders and co-founders (this is very important - list ALL founders)
+                            4. Year founded
+                            5. Location`
                     }
                 ],
-                max_tokens: 1024,
-                temperature: 0.1
-            }
-        });
+                temperature: 0.1,
+                max_tokens: 1024
+            })
+        };
 
-        console.log('Perplexity Raw Response:', response.data?.choices?.[0]?.message?.content);
-        return response.data?.choices?.[0]?.message?.content;
+        const response = await fetch('https://api.perplexity.ai/chat/completions', options);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(`Perplexity API error: ${data.error || 'Unknown error'}`);
+        }
+
+        console.log('Perplexity Raw Response:', data.choices[0].message.content);
+        
+        // Extract structured data using Groq
+        const structuredData = await extractFounderData(data.choices[0].message.content);
+        console.log('Structured Data:', structuredData);
+        return structuredData;
     } catch (error) {
-        console.error('Error getting company data:', error.message);
-        return null;
+        console.error('Error getting company data:', error);
+        throw error;
     }
 }
 
 // 2. Extract structured data using Groq
-async function extractFounderData(rawData) {
-    if (!rawData) return { founders: [], website: '' };
-
+async function extractFounderData(text) {
     try {
-        const completion = await groqClient.chat.completions.create({
-            messages: [
-                {
-                    role: "system",
-                    content: "Extract and structure company information with high precision. Include all founders and executives mentioned."
-                },
-                {
-                    role: "user",
-                    content: `Extract ALL founders, co-founders, and executives from this text and return as JSON:
-${rawData}
-
-Return in this exact format:
-{
-    "companyName": "full legal company name",
-    "website": "company website URL",
-    "yearFounded": "year if mentioned or null",
-    "location": "headquarters location if mentioned or null",
-    "founders": [
+        const prompt = `Extract the following information from the text as JSON:
         {
-            "name": "full name",
-            "role": "current role",
-            "yearJoined": "year joined/founded if mentioned",
-            "previousRoles": ["role 1", "role 2"],
-            "alternateNames": ["alternate spelling 1", "alternate spelling 2"]
-        }
-    ]
-}`
+            "companyName": "full company name",
+            "website": "website or null if not found",
+            "yearFounded": "year or null if not found",
+            "location": "location or null if not found",
+            "founders": [
+                {
+                    "name": "founder full name",
+                    "role": "founder role",
+                    "yearJoined": "year joined or null"
                 }
-            ],
-            model: "mixtral-8x7b-32768",
+            ]
+        }
+        Ensure ALL founders are included in the array.
+        Text: ${text}`;
+
+        const response = await groqClient.chat.completions.create({
+            messages: [{ role: 'user', content: prompt }],
+            model: 'mixtral-8x7b-32768',
             temperature: 0.1,
             max_tokens: 1024
         });
 
-        const result = JSON.parse(completion.choices[0].message.content);
-        console.log('Structured Data:', result);
-        return result;
+        const jsonStr = response.choices[0].message.content;
+        return JSON.parse(jsonStr);
     } catch (error) {
         console.error('Error extracting founder data:', error);
-        return { companyName: '', website: '', yearFounded: null, founders: [] };
+        throw error;
     }
 }
 
-// 3. Find LinkedIn profiles using Exa
+// Simplified LinkedIn profile search function
 async function findLinkedInProfile(founderName, companyName) {
-    console.log(`\n=== Finding LinkedIn Profile for ${founderName} ===`);
-    
     try {
-        if (!founderName || !companyName) return null;
+        const query = `site:linkedin.com/in/ ${founderName} ${companyName}`;
+        console.log('Search query:', query);
 
-        // Try different search variations
-        const searchQueries = [
-            `site:linkedin.com/in/ "${founderName}" "${companyName}" (founder OR ceo OR chief)`,
-            `site:linkedin.com/in/ "${founderName}" "${companyName}"`,
-            `site:linkedin.com/in/ "${founderName}" (founder OR ceo OR chief)`,
-            // Try with name variations
-            `site:linkedin.com/in/ "${founderName.split(' ').reverse().join(' ')}" "${companyName}"`,
-            // Try with partial company name
-            `site:linkedin.com/in/ "${founderName}" "${companyName.split(' ')[0]}"`
-        ];
+        // Correct way to use Exa API
+        const response = await exa.search(query, {
+            type: 'keyword',
+            numResults: 1
+        });
 
-        for (const query of searchQueries) {
-            console.log('Trying search query:', query);
-
-            const response = await exa.search(query, {
-                numResults: 5,
-                useAutoprompt: false
-            });
-
-            if (response?.results) {
-                // Filter and sort results by relevance
-                const linkedInResults = response.results
-                    .filter(result => {
-                        const url = result.url || '';
-                        return url.includes('linkedin.com/in/') && 
-                               !url.includes('/pub/') &&
-                               !url.includes('/company/');
-                    })
-                    .sort((a, b) => {
-                        // Prioritize results that mention both name and company
-                        const aScore = scoreResult(a, founderName, companyName);
-                        const bScore = scoreResult(b, founderName, companyName);
-                        return bScore - aScore;
-                    });
-
-                if (linkedInResults.length > 0) {
-                    const cleanUrl = linkedInResults[0].url.split('?')[0];
-                    console.log('Found LinkedIn URL:', cleanUrl);
-                    return cleanUrl;
-                }
-            }
-
-            // Add delay between queries
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        if (response.results && response.results.length > 0) {
+            const url = response.results[0].url;
+            console.log('Found LinkedIn URL:', url);
+            return url;
         }
 
-        console.log('No LinkedIn profile found after all attempts');
-        return null;
-
+        console.log('No LinkedIn profile found');
+        return 'Not Found';
     } catch (error) {
-        console.error('Error in LinkedIn search:', error.message);
-        return null;
+        console.error('Error finding LinkedIn profile:', error);
+        return 'Not Found';
     }
 }
 
-// Helper function to score search results
-function scoreResult(result, founderName, companyName) {
+// Enhanced scoring function
+function calculateMatchScore(result, founderName, companyName) {
     let score = 0;
     const content = (result.title + ' ' + result.snippet).toLowerCase();
+    const url = result.url.toLowerCase();
+    
+    // Split names into parts
     const nameWords = founderName.toLowerCase().split(' ');
     const companyWords = companyName.toLowerCase().split(' ');
 
-    // Check for name matches
+    // URL checks (weighted heavily)
+    if (url.includes('linkedin.com/in/')) {
+        score += 3;
+        
+        // Check if name appears in LinkedIn URL
+        const urlPath = url.split('linkedin.com/in/')[1];
+        if (nameWords.some(word => urlPath.includes(word.toLowerCase()))) {
+            score += 3;
+        }
+    }
+
+    // Name matching (critical)
+    let nameMatchCount = 0;
     nameWords.forEach(word => {
-        if (content.includes(word)) score += 2;
+        if (content.includes(word)) {
+            nameMatchCount++;
+            score += 2;
+        }
     });
+    
+    // Bonus for full name match
+    if (nameMatchCount === nameWords.length) {
+        score += 3;
+    }
 
-    // Check for company matches
+    // Company matching
+    let companyMatchCount = 0;
     companyWords.forEach(word => {
-        if (content.includes(word)) score += 1;
+        if (word.length > 2 && content.includes(word)) { // Ignore very short words
+            companyMatchCount++;
+            score += 1;
+        }
+    });
+    
+    // Bonus for full company match
+    if (companyMatchCount === companyWords.length) {
+        score += 2;
+    }
+
+    // Role/position matching (important context)
+    const roleIndicators = {
+        'founder': 3,
+        'co-founder': 3,
+        'cofounder': 3,
+        'ceo': 3,
+        'chief': 2,
+        'director': 2,
+        'president': 2,
+        'owner': 2
+    };
+
+    Object.entries(roleIndicators).forEach(([role, points]) => {
+        if (content.includes(role)) {
+            score += points;
+        }
     });
 
-    // Bonus points for role mentions
-    if (content.includes('founder')) score += 3;
-    if (content.includes('ceo')) score += 3;
-    if (content.includes('chief')) score += 2;
-    if (content.includes('co-founder')) score += 3;
+    // Current role indicators
+    if (content.includes('present') || content.includes('current')) {
+        score += 1;
+    }
 
     return score;
 }
@@ -245,7 +248,6 @@ export async function researchCompany(companyName) {
     console.log(`\n=== Researching Company: ${companyName} ===`);
     
     try {
-        // Get raw company data from Perplexity
         const rawData = await getCompanyData(companyName);
         if (!rawData) {
             return { 
@@ -261,34 +263,35 @@ export async function researchCompany(companyName) {
             };
         }
 
-        // Extract structured data using Groq
-        const { founders, website, yearFounded } = await extractFounderData(rawData);
+        const { founders, website, yearFounded } = rawData;
         
-        // Process each founder
         const foundersData = [];
-        if (founders && Array.isArray(founders) && founders.length > 0) {
-            for (const founder of founders) {
-                if (!founder?.name || founder.name === 'Not mentioned') continue;
+        const processedFounders = new Set();
+        
+        for (const founder of founders) {
+            if (!founder?.name || founder.name === 'Not mentioned') continue;
 
-                console.log(`\n👤 Processing founder: ${founder.name}`);
-                
-                // Find LinkedIn profile using Exa
-                const linkedinUrl = await findLinkedInProfile(founder.name, companyName);
-                
-                // Get contact details if LinkedIn profile is found
-                const [emailData, phoneData] = await Promise.all([
-                    getFounderEmail(linkedinUrl || ''),
-                    getFounderPhone(linkedinUrl || '')
-                ]);
+            // Skip if we've already processed this founder
+            if (processedFounders.has(founder.name)) continue;
+            processedFounders.add(founder.name);
+            
+            console.log(`\n👤 Processing founder: ${founder.name}`);
+            
+            const linkedinUrl = await findLinkedInProfile(founder.name, companyName);
+            
+            // Comment out Prospeo API calls
+            /*const [emailData, phoneData] = await Promise.all([
+                getFounderEmail(linkedinUrl || ''),
+                getFounderPhone(linkedinUrl || '')
+            ]);*/
 
-                foundersData.push({
-                    name: founder.name,
-                    role: founder.role || 'Not Found',
-                    linkedinUrl: linkedinUrl || 'Not Found',
-                    email: emailData.email || 'Not Found',
-                    phone: phoneData.phone || 'Not Found'
-                });
-            }
+            foundersData.push({
+                name: founder.name,
+                role: founder.role || 'Not Found',
+                linkedinUrl: linkedinUrl || 'Not Found',
+                email: 'Not Found',
+                phone: 'Not Found'
+            });
         }
 
         // If no founders were found or processed, add a default "Not Found" entry

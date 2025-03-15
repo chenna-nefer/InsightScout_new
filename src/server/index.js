@@ -5,10 +5,14 @@ import { researchCompany, getCompanyNames, saveToExcel } from './services/resear
 import { validateFile } from './middleware/fileValidation.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import fs from 'fs';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+
+
+
 
 // Initialize dotenv
 dotenv.config();
@@ -16,7 +20,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// API Configuration
+// Get API key
 const PROSPEO_API_KEY = process.env.PROSPEO_API_KEY;
 if (!PROSPEO_API_KEY) {
     console.error('Warning: PROSPEO_API_KEY is not set in environment variables');
@@ -26,7 +30,8 @@ if (!PROSPEO_API_KEY) {
 console.log('Prospeo API Key status:', PROSPEO_API_KEY ? 'Configured' : 'Missing');
 
 const app = express();
-const port = process.env.PORT || 7501;
+const server = createServer(app);
+
 
 // Middleware
 app.use(cors({
@@ -41,6 +46,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(express.static(join(__dirname, '../../public')));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -213,7 +219,7 @@ app.post('/api/research/cancel/:jobId', (req, res) => {
   res.json({ message: 'Research cancelled successfully' });
 });
 
-// Add these endpoints after other API routes
+// Add these endpoints if they're not already present
 app.post('/api/research/email', async (req, res) => {
     try {
         const { url } = req.body;
@@ -221,9 +227,7 @@ app.post('/api/research/email', async (req, res) => {
             return res.status(400).json({ error: 'LinkedIn URL is required' });
         }
 
-        if (!PROSPEO_API_KEY) {
-            return res.status(500).json({ error: 'Prospeo API key not configured' });
-        }
+        console.log('Searching email for LinkedIn URL:', url);
 
         const response = await axios({
             method: 'post',
@@ -237,21 +241,14 @@ app.post('/api/research/email', async (req, res) => {
 
         if (response.data?.error === false && response.data?.response?.email?.email) {
             const email = response.data.response.email.email;
-            const emailStatus = response.data.response.email.email_status;
-            
-            // Accept VALID emails as well
-            if (emailStatus === 'VERIFIED' || emailStatus === 'ACCEPT_ALL' || emailStatus === 'VALID') {
-                return res.json({ email });
-            }
+            console.log('Found email:', email);
+            return res.json({ email });
         }
 
         return res.json({ email: null });
 
     } catch (error) {
-        console.error('Error finding email:', error.message);
-        if (error.response?.data?.message === 'INSUFFICIENT_CREDITS') {
-            return res.status(402).json({ error: 'Out of Prospeo credits' });
-        }
+        console.error('Error finding email:', error);
         return res.status(500).json({ error: 'Failed to fetch email' });
     }
 });
@@ -263,9 +260,7 @@ app.post('/api/research/phone', async (req, res) => {
             return res.status(400).json({ error: 'LinkedIn URL is required' });
         }
 
-        if (!PROSPEO_API_KEY) {
-            return res.status(500).json({ error: 'Prospeo API key not configured' });
-        }
+        console.log('Searching phone for LinkedIn URL:', url);
 
         const response = await axios({
             method: 'post',
@@ -279,16 +274,14 @@ app.post('/api/research/phone', async (req, res) => {
 
         if (response.data?.error === false && response.data?.response?.raw_format) {
             const phone = response.data.response.raw_format;
+            console.log('Found phone:', phone);
             return res.json({ phone });
         }
 
         return res.json({ phone: null });
 
     } catch (error) {
-        console.error('Error finding phone number:', error.message);
-        if (error.response?.data?.message === 'INSUFFICIENT_CREDITS') {
-            return res.status(402).json({ error: 'Out of Prospeo credits' });
-        }
+        console.error('Error finding phone number:', error);
         return res.status(500).json({ error: 'Failed to fetch phone number' });
     }
 });
@@ -370,52 +363,94 @@ app.post('/api/research/start', express.json(), async (req, res) => {
 
 // Helper functions
 async function processCompanies(companies, jobId) {
-  const results = [];
-  let processed = 0;
-  
-  for (const company of companies) {
-    // Check if job is cancelled
-    const job = jobs.get(jobId);
-    if (!job || job.isCancelled) {
-      console.log(`Job ${jobId} was cancelled, stopping processing`);
-      return;
-    }
+    const results = [];
+    let processed = 0;
 
     try {
-      if (!company) {
-        console.log('Skipping empty company name');
-        continue;
-      }
+        for (const company of companies) {
+            if (!company) continue;
 
-      // Update current company being processed
-      updateJobProgress(jobId, (processed / companies.length) * 100, results, company);
-      
-      console.log(`Processing company: ${company}`);
-      const result = await researchCompany(company);
-      
-      if (result) {
-        results.push(result);
-        // Update results immediately after each company is processed
-        updateJobProgress(jobId, ((processed + 1) / companies.length) * 100, results, company);
-      }
-      
-      processed++;
-      
-      // Add delay between requests
-      await new Promise(resolve => setTimeout(resolve, 3000));
+            console.log(`Processing company: ${company}`);
+            
+            // Research the company
+            const result = await researchCompany(company);
+            
+            if (result) {
+                // Process each founder sequentially
+                const foundersWithContacts = [];
+                
+                for (const founder of result.foundersData) {
+                    let email = 'Not Found';
+                    let phone = 'Not Found';
+
+                    // Only search contact info if LinkedIn URL exists and is valid
+                    if (founder.linkedinUrl && founder.linkedinUrl !== 'Not Found') {
+                        console.log(`Searching contact info for ${founder.name} using LinkedIn: ${founder.linkedinUrl}`);
+                        
+                        try {
+                            // Get email directly from Prospeo
+                            const emailResponse = await axios({
+                                method: 'post',
+                                url: 'https://api.prospeo.io/social-url-enrichment',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-KEY': PROSPEO_API_KEY
+                                },
+                                data: { url: founder.linkedinUrl }
+                            });
+
+                            if (emailResponse.data?.error === false && emailResponse.data?.response?.email?.email) {
+                                email = emailResponse.data.response.email.email;
+                                console.log(`Found email for ${founder.name}: ${email}`);
+                            }
+
+                            // Get phone directly from Prospeo
+                            const phoneResponse = await axios({
+                                method: 'post',
+                                url: 'https://api.prospeo.io/mobile-finder',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-KEY': PROSPEO_API_KEY
+                                },
+                                data: { url: founder.linkedinUrl }
+                            });
+
+                            if (phoneResponse.data?.error === false && phoneResponse.data?.response?.raw_format) {
+                                phone = phoneResponse.data.response.raw_format;
+                                console.log(`Found phone for ${founder.name}: ${phone}`);
+                            }
+                        } catch (error) {
+                            console.error(`Error fetching contact info for ${founder.name}:`, error.message);
+                            // Continue with next founder even if this one fails
+                        }
+                    }
+
+                    foundersWithContacts.push({
+                        ...founder,
+                        email,
+                        phone
+                    });
+                }
+
+                results.push({
+                    companyName: result.companyName,
+                    status: 'Completed',
+                    foundersData: foundersWithContacts
+                });
+            }
+
+            processed++;
+            updateJobProgress(jobId, (processed / companies.length) * 100, results, company);
+        }
+
+        updateJobStatus(jobId, 'completed', results);
+        return results;
+
     } catch (error) {
-      console.error(`Error processing ${company}:`, error);
-      // Continue with next company even if one fails
-      processed++;
-      updateJobProgress(jobId, (processed / companies.length) * 100, results, company);
+        console.error('Error processing companies:', error);
+        updateJobStatus(jobId, 'failed', results, error.message);
+        throw error;
     }
-  }
-
-  // Only update status if not cancelled
-  const job = jobs.get(jobId);
-  if (!job || !job.isCancelled) {
-    updateJobStatus(jobId, 'completed', results);
-  }
 }
 
 function updateJobProgress(jobId, progress, results, currentCompany = '') {
@@ -449,6 +484,36 @@ function updateJobStatus(jobId, status, results = [], error = null) {
 }
 
 // Start server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+server.listen(process.env.PORT || 7501, () => {
+  console.log(`Server running on port ${process.env.PORT || 7501}`);
+});
+
+app.post('/api/research', async (req, res) => {
+    const { companies } = req.body;
+    try {
+        const jobId = Date.now().toString();
+        
+        // Initialize job
+        jobs.set(jobId, {
+            status: 'processing',
+            progress: 0,
+            total: companies.length,
+            results: [],
+            currentCompany: '',
+            lastUpdated: Date.now()
+        });
+
+        // Send initial response with jobId
+        res.json({ jobId });
+
+        // Process companies in background
+        processCompanies(companies, jobId).catch(error => {
+            console.error('Error processing companies:', error);
+            updateJobStatus(jobId, 'failed', [], error.message);
+        });
+
+    } catch (error) {
+        console.error('Research error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 }); 

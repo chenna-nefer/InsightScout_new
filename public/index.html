@@ -15,15 +15,20 @@
     <div class="container">
         <div class="input-section">
             <h2>Start Your Research</h2>
+            
+            <!-- Add company name input section -->
+            <div class="company-input">
+                <input type="text" id="company-name-input" placeholder="Enter company name">
+                <button class="button" id="search-company">Search Company</button>
+            </div>
+            
+            <div class="or-divider">OR</div>
+            
             <div class="file-upload" onclick="document.getElementById('file-input').click()">
                 <input type="file" id="file-input" hidden accept=".xlsx,.csv">
                 <p>Drop your Excel/CSV file here</p>
                 <p>or click to browse</p>
             </div>
-            
-            <div class="or-divider">OR</div>
-
-            <!-- <textarea placeholder="Enter company names (one per line)"></textarea> -->
             
             <button class="button" id="start-research">Start Research</button>
         </div>
@@ -38,18 +43,17 @@
         </div>
 
         <div class="results-section" id="results-section">
-            <h2>Research Results</h2>
             <div class="results-summary">
                 <p>Total Companies: <span id="total-companies">0</span></p>
                 <p>Founders Found: <span id="total-founders">0</span></p>
                 <p>LinkedIn Profiles: <span id="total-linkedin">0</span></p>
             </div>
-            <div class="button-group">
+            <div class="button-group" id="button-group">
                 <button class="button" id="download-results">Download Results</button>
                 <button class="button" id="start-new">Start New Research</button>
             </div>
-            <div class="table-container">
-                <table class="results-grid">
+            <div class="table-container" id="table-container">
+                <table class="results-grid" id="results-grid">
                     <thead>
                         <tr>
                             <th>Company</th>
@@ -60,7 +64,7 @@
                             <th>Phone</th>
                         </tr>
                     </thead>
-                    <tbody id="results-body">
+                    <tbody id="results-body" class="results-body">
                         <!-- Results will be inserted here -->
                     </tbody>
                 </table>
@@ -69,6 +73,7 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
-    <script src="script.js"></script>
+    <!-- <script src="/socket.io/socket.io.js"></script> -->
+    <script src="./script.js"></script>
 </body>
 </html>
