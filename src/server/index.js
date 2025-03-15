@@ -360,16 +360,15 @@ app.post('/api/research/load', upload.single('file'), async (req, res) => {
 // Update research start endpoint
 app.post('/api/research/start', async (req, res) => {
     try {
-        const { companies } = req.body;
+        console.log('Received research request:', req.body);
         
+        const { companies } = req.body;
         if (!companies || !Array.isArray(companies) || companies.length === 0) {
             return res.status(400).json({
                 success: false,
-                error: 'No companies provided'
+                error: 'Invalid or empty companies data'
             });
         }
-
-        console.log('Received research request for companies:', companies);
 
         const jobId = Date.now().toString();
         
@@ -379,28 +378,27 @@ app.post('/api/research/start', async (req, res) => {
             progress: 0,
             total: companies.length,
             results: [],
-            currentCompany: '',
+            currentCompany: companies[0],
             lastUpdated: Date.now()
         });
 
         console.log('Created job:', jobId);
-        
+
+        // Send response before starting processing
+        res.status(200).json({
+            success: true,
+            jobId: jobId
+        });
+
         // Start processing in background
         processCompanies(companies, jobId).catch(error => {
-            console.error('Error in background processing:', error);
+            console.error('Processing error:', error);
             updateJobStatus(jobId, 'failed', [], error.message);
-        });
-        
-        // Send response
-        return res.status(200).json({
-            success: true,
-            jobId: jobId,
-            message: 'Research started successfully'
         });
 
     } catch (error) {
-        console.error('Error in /api/research/start:', error);
-        return res.status(500).json({
+        console.error('Error handling research start:', error);
+        res.status(500).json({
             success: false,
             error: error.message || 'Internal server error'
         });
@@ -566,5 +564,14 @@ app.post('/api/research', async (req, res) => {
 
 // Add this near your other routes
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({
+        status: 'ok',
+        env: process.env.NODE_ENV,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Add this near your other routes
+app.get('/test', (req, res) => {
+    res.json({ message: 'Server is working' });
 }); 

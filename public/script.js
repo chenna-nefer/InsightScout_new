@@ -1,6 +1,8 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     // API Configuration
-    const API_BASE_URL = 'https://insightscout-new.onrender.com';
+    const API_BASE_URL = window.location.hostname.includes('localhost') 
+        ? 'http://localhost:7501'
+        : 'https://insightscout-new.onrender.com';
 
     // DOM Elements with validation
     const elements = {};
@@ -50,6 +52,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
+        // Check server health before initializing
+        const isServerHealthy = await checkServerHealth();
+        if (!isServerHealthy) {
+            throw new Error('Server is not responding correctly');
+        }
+
         // Initialize elements and validate their existence
         initializeElements();
         
@@ -163,54 +171,48 @@ document.addEventListener('DOMContentLoaded', function() {
 
         async function handleCompanySearch(companies) {
             try {
+                console.log('Starting company search with:', companies);
+
                 if (!elements.resultsBody || !elements.progressSection || !elements.resultsSection) {
                     throw new Error('Required DOM elements not found');
                 }
 
+                // Update UI
                 elements.resultsBody.innerHTML = '';
                 updateTableWithCompanies(companies);
-                
                 elements.progressSection.style.display = 'block';
                 elements.resultsSection.style.display = 'block';
                 elements.progressBarFill.style.width = '0%';
                 elements.currentCompanySpan.textContent = 'Starting research...';
 
-                const requestOptions = {
+                // Make the API request
+                console.log('Sending request to:', `${API_BASE_URL}/api/research/start`);
+                
+                const response = await fetch(`${API_BASE_URL}/api/research/start`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    mode: 'cors',
                     body: JSON.stringify({ companies })
-                };
+                });
 
-                console.log('Sending request to:', `${API_BASE_URL}/api/research/start`);
-                console.log('Request payload:', { companies });
+                // Log response details
+                console.log('Response status:', response.status);
+                console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
-                const response = await fetch(`${API_BASE_URL}/api/research/start`, requestOptions);
-                
-                // Log the raw response for debugging
                 const responseText = await response.text();
                 console.log('Raw response:', responseText);
 
-                let data;
-                try {
-                    // Try to parse the response as JSON
-                    data = JSON.parse(responseText);
-                } catch (parseError) {
-                    console.error('Failed to parse response:', parseError);
-                    throw new Error('Invalid server response');
+                if (!responseText) {
+                    throw new Error('Empty response from server');
                 }
 
-                if (!response.ok || !data.success) {
-                    throw new Error(data.error || 'Failed to start research');
-                }
+                const data = JSON.parse(responseText);
+                console.log('Parsed response:', data);
 
-                console.log('Processed response:', data);
-
-                if (!data.jobId) {
-                    throw new Error('No job ID received from server');
+                if (!data.success || !data.jobId) {
+                    throw new Error(data.error || 'Invalid response from server');
                 }
 
                 currentJobId = data.jobId;
@@ -219,10 +221,6 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 console.error('Error in handleCompanySearch:', error);
                 handleError(error);
-                
-                // Update UI to show error
-                elements.currentCompanySpan.textContent = 'Error starting research';
-                elements.progressBarFill.style.backgroundColor = '#ff4444';
             }
         }
 
@@ -498,12 +496,26 @@ document.addEventListener('DOMContentLoaded', function() {
             elements.currentCompanySpan.textContent = 'Research completed!';
             elements.progressBarFill.style.backgroundColor = '#4CAF50';
         }
+
+        // Add this helper function to check server health
+        async function checkServerHealth() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/health`);
+                const data = await response.json();
+                console.log('Server health check:', data);
+                return data.status === 'ok';
+            } catch (error) {
+                console.error('Server health check failed:', error);
+                return false;
+            }
+        }
     } catch (error) {
         console.error('Initialization error:', error);
         document.body.innerHTML = `
             <div style="color: red; padding: 20px; text-align: center;">
                 <h2>Error Initializing Application</h2>
                 <p>${error.message}</p>
+                <button onclick="location.reload()">Retry</button>
             </div>
         `;
     }
