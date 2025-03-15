@@ -186,17 +186,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
 
                 console.log('Sending request to:', `${API_BASE_URL}/api/research/start`);
-                console.log('Request options:', requestOptions);
+                console.log('Request payload:', { companies });
 
                 const response = await fetch(`${API_BASE_URL}/api/research/start`, requestOptions);
                 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                // Log the raw response for debugging
+                const responseText = await response.text();
+                console.log('Raw response:', responseText);
+
+                let data;
+                try {
+                    // Try to parse the response as JSON
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error('Failed to parse response:', parseError);
+                    throw new Error('Invalid server response');
                 }
 
-                const data = await response.json();
-                console.log('Received response:', data);
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to start research');
+                }
+
+                console.log('Processed response:', data);
+
+                if (!data.jobId) {
+                    throw new Error('No job ID received from server');
+                }
 
                 currentJobId = data.jobId;
                 startProgressTracking(data.jobId);
@@ -204,6 +219,10 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 console.error('Error in handleCompanySearch:', error);
                 handleError(error);
+                
+                // Update UI to show error
+                elements.currentCompanySpan.textContent = 'Error starting research';
+                elements.progressBarFill.style.backgroundColor = '#ff4444';
             }
         }
 
@@ -218,13 +237,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         mode: 'cors'
                     });
 
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                    const responseText = await response.text();
+                    console.log('Status response:', responseText);
+
+                    let data;
+                    try {
+                        data = JSON.parse(responseText);
+                    } catch (parseError) {
+                        console.error('Failed to parse status response:', parseError);
+                        clearInterval(interval);
+                        return;
                     }
 
-                    const data = await response.json();
-
-                    if (!response.ok) throw new Error('Failed to get status');
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to get status');
+                    }
 
                     elements.progressBarFill.style.width = `${data.progress}%`;
                     
@@ -449,10 +476,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 elements.resultsBody.innerHTML = `
                     <tr>
                         <td colspan="6" class="error-message">
-                            ${error.message || 'An error occurred during research'}
+                            ${error.message || 'An unexpected error occurred. Please try again.'}
                         </td>
                     </tr>
                 `;
+            }
+            
+            // Reset UI states
+            if (elements.progressSection) {
+                elements.progressSection.style.display = 'none';
+            }
+            if (elements.inputSection) {
+                elements.inputSection.style.display = 'block';
             }
         }
 

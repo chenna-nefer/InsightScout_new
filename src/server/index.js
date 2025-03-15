@@ -358,16 +358,22 @@ app.post('/api/research/load', upload.single('file'), async (req, res) => {
 });
 
 // Update research start endpoint
-app.post('/api/research/start', express.json(), async (req, res) => {
+app.post('/api/research/start', async (req, res) => {
     try {
         const { companies } = req.body;
         
         if (!companies || !Array.isArray(companies) || companies.length === 0) {
-            return res.status(400).json({ error: 'No companies provided' });
+            return res.status(400).json({
+                success: false,
+                error: 'No companies provided'
+            });
         }
+
+        console.log('Received research request for companies:', companies);
 
         const jobId = Date.now().toString();
         
+        // Initialize job
         jobs.set(jobId, {
             status: 'processing',
             progress: 0,
@@ -376,14 +382,28 @@ app.post('/api/research/start', express.json(), async (req, res) => {
             currentCompany: '',
             lastUpdated: Date.now()
         });
+
+        console.log('Created job:', jobId);
         
         // Start processing in background
-        processCompanies(companies, jobId);
+        processCompanies(companies, jobId).catch(error => {
+            console.error('Error in background processing:', error);
+            updateJobStatus(jobId, 'failed', [], error.message);
+        });
         
-        res.json({ jobId });
+        // Send response
+        return res.status(200).json({
+            success: true,
+            jobId: jobId,
+            message: 'Research started successfully'
+        });
 
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('Error in /api/research/start:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Internal server error'
+        });
     }
 });
 
