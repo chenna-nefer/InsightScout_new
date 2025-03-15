@@ -187,17 +187,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const response = await fetch(`${API_BASE_URL}/api/research/start`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Origin': window.location.origin
+                    },
+                    credentials: 'include',
                     body: JSON.stringify({ companies })
                 });
 
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Failed to start research');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to start research');
+                }
 
+                const data = await response.json();
                 currentJobId = data.jobId;
                 startProgressTracking(data.jobId);
 
             } catch (error) {
+                console.error('Error:', error);
                 handleError(error);
             }
         }
@@ -205,7 +214,14 @@ document.addEventListener('DOMContentLoaded', function() {
         async function startProgressTracking(jobId) {
             const interval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/api/research/status/${jobId}`);
+                    const response = await fetch(`${API_BASE_URL}/api/research/status/${jobId}`, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'Origin': window.location.origin
+                        },
+                        credentials: 'include'
+                    });
+
                     const data = await response.json();
 
                     if (!response.ok) throw new Error('Failed to get status');

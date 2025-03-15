@@ -35,16 +35,43 @@ const server = createServer(app);
 
 // Middleware
 app.use(cors({
-  origin: [
-    'http://localhost:5500', 
-    'http://127.0.0.1:5500',
-    'https://insightscout-new.onrender.com',
-    'https://insightscout-new.onrender.com/'
-  ],
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-  credentials: true
+    origin: [
+        'http://localhost:5500',
+        'http://127.0.0.1:5500',
+        'https://insightscout.onrender.com',
+        'https://insightscout-new.onrender.com',
+        'https://insightscout.onrender.com/'  // with trailing slash
+    ],
+    methods: ['GET', 'POST', 'OPTIONS'],  // Add OPTIONS method
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'Accept',
+        'Origin'
+    ],
+    credentials: true,
+    optionsSuccessStatus: 200
 }));
+
+// Add a preflight handler for all routes
+app.options('*', cors());
+
+// Add headers middleware
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin);
+    res.header('Access-Control-Allow-Credentials', true);
+    res.header(
+        'Access-Control-Allow-Headers',
+        'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+    );
+    res.header(
+        'Access-Control-Allow-Methods',
+        'GET, POST, PUT, DELETE, OPTIONS'
+    );
+    next();
+});
+
 app.use(express.json());
 app.use(express.static(join(__dirname, '../../public')));
 
