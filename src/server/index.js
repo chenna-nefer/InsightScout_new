@@ -32,43 +32,42 @@ console.log('Prospeo API Key status:', PROSPEO_API_KEY ? 'Configured' : 'Missing
 const app = express();
 const server = createServer(app);
 
-
-// Middleware
-app.use(cors({
-    origin: [
-        'http://localhost:5500',
-        'http://127.0.0.1:5500',
-        'https://insightscout.onrender.com',
-        'https://insightscout-new.onrender.com',
-        'https://insightscout.onrender.com/'  // with trailing slash
-    ],
-    methods: ['GET', 'POST', 'OPTIONS'],  // Add OPTIONS method
-    allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'X-Requested-With',
-        'Accept',
-        'Origin'
-    ],
+// Before other middleware
+const corsOptions = {
+    origin: function (origin, callback) {
+        const allowedOrigins = [
+            'http://localhost:5500',
+            'http://127.0.0.1:5500',
+            'https://insightscout.onrender.com',
+            'https://insightscout-new.onrender.com',
+            'https://insightscout.onrender.com',
+            undefined // Allow requests with no origin (like mobile apps or curl requests)
+        ];
+        
+        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     optionsSuccessStatus: 200
-}));
+};
 
-// Add a preflight handler for all routes
-app.options('*', cors());
+app.use(cors(corsOptions));
 
-// Add headers middleware
+// Enable pre-flight requests for all routes
+app.options('*', cors(corsOptions));
+
+// Add security headers middleware
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', req.headers.origin);
-    res.header('Access-Control-Allow-Credentials', true);
-    res.header(
-        'Access-Control-Allow-Headers',
-        'Origin, X-Requested-With, Content-Type, Accept, Authorization'
-    );
-    res.header(
-        'Access-Control-Allow-Methods',
-        'GET, POST, PUT, DELETE, OPTIONS'
-    );
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
     next();
 });
 
@@ -543,4 +542,9 @@ app.post('/api/research', async (req, res) => {
         console.error('Research error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
+});
+
+// Add this near your other routes
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 }); 

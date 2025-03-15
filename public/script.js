@@ -1,6 +1,5 @@
 document.addEventListener('DOMContentLoaded', function() {
     // API Configuration
-    // const API_BASE_URL = 'http://localhost:7501';
     const API_BASE_URL = 'https://insightscout-new.onrender.com';
 
     // DOM Elements with validation
@@ -171,42 +170,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 elements.resultsBody.innerHTML = '';
                 updateTableWithCompanies(companies);
                 
-                if (elements.progressSection) {
-                    elements.progressSection.style.display = 'block';
-                }
-                if (elements.resultsSection) {
-                    elements.resultsSection.style.display = 'block';
-                }
-                
-                if (elements.progressBarFill) {
-                    elements.progressBarFill.style.width = '0%';
-                }
-                if (elements.currentCompanySpan) {
-                    elements.currentCompanySpan.textContent = 'Starting research...';
-                }
+                elements.progressSection.style.display = 'block';
+                elements.resultsSection.style.display = 'block';
+                elements.progressBarFill.style.width = '0%';
+                elements.currentCompanySpan.textContent = 'Starting research...';
 
-                const response = await fetch(`${API_BASE_URL}/api/research/start`, {
+                const requestOptions = {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        'Origin': window.location.origin
+                        'Accept': 'application/json'
                     },
-                    credentials: 'include',
+                    mode: 'cors',
                     body: JSON.stringify({ companies })
-                });
+                };
 
+                console.log('Sending request to:', `${API_BASE_URL}/api/research/start`);
+                console.log('Request options:', requestOptions);
+
+                const response = await fetch(`${API_BASE_URL}/api/research/start`, requestOptions);
+                
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || 'Failed to start research');
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
+                console.log('Received response:', data);
+
                 currentJobId = data.jobId;
                 startProgressTracking(data.jobId);
 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Error in handleCompanySearch:', error);
                 handleError(error);
             }
         }
@@ -215,12 +211,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const interval = setInterval(async () => {
                 try {
                     const response = await fetch(`${API_BASE_URL}/api/research/status/${jobId}`, {
+                        method: 'GET',
                         headers: {
-                            'Accept': 'application/json',
-                            'Origin': window.location.origin
+                            'Accept': 'application/json'
                         },
-                        credentials: 'include'
+                        mode: 'cors'
                     });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
 
                     const data = await response.json();
 
