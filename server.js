@@ -423,7 +423,7 @@ async function getLinkedInProfile(founderName, companyName) {
       return '';
     }
 
-    const searchQuery = `site:linkedin.com/in/ ${founderName} ${companyName}`;
+    const searchQuery = `site:linkedin.com/ ${founderName} ${companyName}`;
     
     // Use correct Exa search method
     const results = await exa.search(searchQuery, {

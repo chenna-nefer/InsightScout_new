@@ -10,6 +10,7 @@ import fs from 'fs';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
+import fetch from 'node-fetch';
 
 
 
@@ -20,14 +21,38 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Get API key
+// Add API configuration
+const PROSPEO_BASE_URL = 'https://api.prospeo.io/v1';
+const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const EXA_API_KEY = process.env.EXA_API_KEY;
 const PROSPEO_API_KEY = process.env.PROSPEO_API_KEY;
-if (!PROSPEO_API_KEY) {
-    console.error('Warning: PROSPEO_API_KEY is not set in environment variables');
+
+// Add at the top of the file
+const requiredEnvVars = {
+    'PERPLEXITY_API_KEY': process.env.PERPLEXITY_API_KEY,
+    'GROQ_API_KEY': process.env.GROQ_API_KEY,
+    'EXA_API_KEY': process.env.EXA_API_KEY,
+    'PROSPEO_API_KEY': process.env.PROSPEO_API_KEY
+};
+
+// Validate environment variables
+const missingVars = Object.entries(requiredEnvVars)
+    .filter(([_, value]) => !value)
+    .map(([key]) => key);
+
+if (missingVars.length > 0) {
+    console.error('Missing required environment variables:', missingVars.join(', '));
+    process.exit(1);
 }
 
-// Log API key status (without revealing the key)
-console.log('Prospeo API Key status:', PROSPEO_API_KEY ? 'Configured' : 'Missing');
+// Log API configurations (without exposing keys)
+console.log('API Configurations:', {
+    perplexity: !!process.env.PERPLEXITY_API_KEY,
+    groq: !!process.env.GROQ_API_KEY,
+    exa: !!process.env.EXA_API_KEY,
+    prospeo: !!process.env.PROSPEO_API_KEY
+});
 
 const app = express();
 const server = createServer(app);
@@ -76,7 +101,11 @@ app.use(express.static(join(__dirname, '../../public')));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    apiKey: !!PROSPEO_API_KEY
+  });
 });
 
 // Configure multer for memory storage
@@ -104,6 +133,38 @@ setInterval(() => {
         }
     }
 }, 300000); // Run every 5 minutes
+
+// Helper function for Prospeo API calls
+async function callProspeoAPI(endpoint, data) {
+    console.log(`Calling Prospeo API: ${endpoint}`, data);
+    
+    const url = `${PROSPEO_BASE_URL}${endpoint}`;
+    console.log('Full API URL:', url);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${PROSPEO_API_KEY}`,
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify(data)
+    });
+
+    const responseText = await response.text();
+    console.log(`Prospeo API Response (${endpoint}):`, responseText);
+
+    if (!response.ok) {
+        throw new Error(`Prospeo API error (${endpoint}): ${response.status} - ${responseText}`);
+    }
+
+    try {
+        return responseText ? JSON.parse(responseText) : null;
+    } catch (e) {
+        console.error('Error parsing Prospeo response:', e);
+        throw new Error(`Invalid response from Prospeo API: ${responseText}`);
+    }
+}
 
 // API Routes
 app.post('/api/research/upload', upload.single('file'), async (req, res) => {
@@ -153,7 +214,7 @@ app.post('/api/research/upload', upload.single('file'), async (req, res) => {
     activeJobs.add(jobId);
     
     // Start processing in background
-    processCompanies(companies, jobId).catch(error => {
+    processCompanies(jobId, companies).catch(error => {
       console.error('Error processing companies:', error);
       updateJobStatus(jobId, 'failed', [], error.message);
     });
@@ -191,7 +252,7 @@ app.post('/api/research/text', async (req, res) => {
     });
     
     // Start processing in background
-    processCompanies(companies, jobId).catch(error => {
+    processCompanies(jobId, companies).catch(error => {
       console.error('Error processing companies:', error);
       updateJobStatus(jobId, 'failed', [], error.message);
     });
@@ -206,24 +267,56 @@ app.post('/api/research/text', async (req, res) => {
   }
 });
 
+// Update the status endpoint to include rate limiting
+const statusChecks = new Map(); // Track status check frequencies
+
 app.get('/api/research/status/:jobId', (req, res) => {
-  const { jobId } = req.params;
-  const job = jobs.get(jobId);
-  
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
-  
-  // Include all relevant job information
-  res.json({
-    status: job.status,
-    progress: job.progress,
-    total: job.total,
-    results: job.results,
-    currentCompany: job.currentCompany,
-    error: job.error,
-    isActive: activeJobs.has(jobId)
-  });
+    try {
+        const { jobId } = req.params;
+        
+        // Rate limiting
+        const now = Date.now();
+        const lastCheck = statusChecks.get(jobId) || 0;
+        if (now - lastCheck < 2000) { // Minimum 2 seconds between checks
+            return res.status(429).json({
+                success: false,
+                error: 'Too many status checks. Please wait.'
+            });
+        }
+        statusChecks.set(jobId, now);
+
+        console.log('Status request for jobId:', jobId);
+        const job = jobs.get(jobId);
+        
+        if (!job) {
+            console.log('Job not found');
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Job not found' 
+            });
+        }
+
+        // Clear status check tracking if job is complete
+        if (job.status === 'completed' || job.status === 'error') {
+            statusChecks.delete(jobId);
+        }
+
+        res.json({
+            success: true,
+            status: job.status,
+            progress: job.progress,
+            currentCompany: job.currentCompany,
+            results: job.results,
+            error: job.error || null
+        });
+
+    } catch (error) {
+        console.error('Error getting status:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
 });
 
 // Add cancel endpoint
@@ -245,7 +338,7 @@ app.post('/api/research/cancel/:jobId', (req, res) => {
   res.json({ message: 'Research cancelled successfully' });
 });
 
-// Add these endpoints if they're not already present
+// Update these endpoints to use the correct API URLs and headers
 app.post('/api/research/email', async (req, res) => {
     try {
         const { url } = req.body;
@@ -256,13 +349,13 @@ app.post('/api/research/email', async (req, res) => {
         console.log('Searching email for LinkedIn URL:', url);
 
         const response = await axios({
-            method: 'post',
-            url: 'https://api.prospeo.io/social-url-enrichment',
+            method: 'POST',
+            url: 'https://api.prospeo.io/social-url-enrichment', // Updated endpoint
             headers: {
                 'Content-Type': 'application/json',
-                'X-KEY': PROSPEO_API_KEY
+                'X-KEY': PROSPEO_API_KEY  // Updated header
             },
-            data: { url }
+            data: { url } // Using url instead of linkedin_url
         });
 
         if (response.data?.error === false && response.data?.response?.email?.email) {
@@ -289,13 +382,13 @@ app.post('/api/research/phone', async (req, res) => {
         console.log('Searching phone for LinkedIn URL:', url);
 
         const response = await axios({
-            method: 'post',
-            url: 'https://api.prospeo.io/mobile-finder',
+            method: 'POST',
+            url: 'https://api.prospeo.io/mobile-finder', // Updated endpoint
             headers: {
                 'Content-Type': 'application/json',
-                'X-KEY': PROSPEO_API_KEY
+                'X-KEY': PROSPEO_API_KEY  // Updated header
             },
-            data: { url }
+            data: { url } // Using url instead of linkedin_url
         });
 
         if (response.data?.error === false && response.data?.response?.raw_format) {
@@ -360,140 +453,122 @@ app.post('/api/research/load', upload.single('file'), async (req, res) => {
 // Update research start endpoint
 app.post('/api/research/start', async (req, res) => {
     try {
-        console.log('Received research request:', req.body);
-        
         const { companies } = req.body;
         if (!companies || !Array.isArray(companies) || companies.length === 0) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid or empty companies data'
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Invalid input: companies array is required' 
             });
         }
 
         const jobId = Date.now().toString();
-        
-        // Initialize job
-        jobs.set(jobId, {
-            status: 'processing',
+        console.log('Creating new job with ID:', jobId);
+
+        // Initialize job with more detailed structure
+        const job = {
+            id: jobId,
+            companies,
+            status: 'in_progress',
             progress: 0,
-            total: companies.length,
-            results: [],
             currentCompany: companies[0],
-            lastUpdated: Date.now()
-        });
+            results: [],
+            startTime: new Date().toISOString(),
+            totalCompanies: companies.length
+        };
 
-        console.log('Created job:', jobId);
+        jobs.set(jobId, job);
+        console.log('Job initialized:', job);
 
-        // Send response before starting processing
-        res.status(200).json({
-            success: true,
-            jobId: jobId
-        });
+        // Send response to client
+        res.json({ success: true, jobId });
 
-        // Start processing in background
-        processCompanies(companies, jobId).catch(error => {
-            console.error('Processing error:', error);
-            updateJobStatus(jobId, 'failed', [], error.message);
-        });
+        // Start processing
+        processCompanies(jobId, companies);
 
     } catch (error) {
-        console.error('Error handling research start:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Internal server error'
-        });
+        console.error('Error starting research:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Helper functions
-async function processCompanies(companies, jobId) {
-    const results = [];
-    let processed = 0;
+// Update the processCompanies function to handle timeouts and add proper delays
+async function processCompanies(jobId, companies) {
+    const job = jobs.get(jobId);
+    const totalCompanies = companies.length;
 
     try {
-        for (const company of companies) {
-            if (!company) continue;
+        for (let i = 0; i < companies.length; i++) {
+            if (job.status === 'cancelled') break;
 
-            console.log(`Processing company: ${company}`);
-            
-            // Research the company
-            const result = await researchCompany(company);
-            
-            if (result) {
-                // Process each founder sequentially
-                const foundersWithContacts = [];
+            const company = companies[i];
+            console.log(`Processing company ${i + 1}/${totalCompanies}: ${company}`);
+
+            job.currentCompany = company;
+            job.progress = Math.round((i / totalCompanies) * 100);
+            jobs.set(jobId, { ...job });
+
+            try {
+                // Process with timeout safety
+                const result = await Promise.race([
+                    researchCompany(company),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Research timeout after 60 seconds')), 60000)
+                    )
+                ]);
+
+                console.log(`Research result for ${company}:`, result);
+
+                // Always add result to job results, even if some fields are "Not Found"
+                job.results.push({
+                    companyName: company,
+                    foundersData: result.foundersData || [],
+                    website: result.website || 'Not Found',
+                    yearFounded: result.yearFounded || 'Not Found',
+                    status: 'completed'
+                });
+
+            } catch (error) {
+                console.error(`Error processing company ${company}:`, error);
                 
-                for (const founder of result.foundersData) {
-                    let email = 'Not Found';
-                    let phone = 'Not Found';
-
-                    // Only search contact info if LinkedIn URL exists and is valid
-                    if (founder.linkedinUrl && founder.linkedinUrl !== 'Not Found') {
-                        console.log(`Searching contact info for ${founder.name} using LinkedIn: ${founder.linkedinUrl}`);
-                        
-                        try {
-                            // Get email directly from Prospeo
-                            const emailResponse = await axios({
-                                method: 'post',
-                                url: 'https://api.prospeo.io/social-url-enrichment',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'X-KEY': PROSPEO_API_KEY
-                                },
-                                data: { url: founder.linkedinUrl }
-                            });
-
-                            if (emailResponse.data?.error === false && emailResponse.data?.response?.email?.email) {
-                                email = emailResponse.data.response.email.email;
-                                console.log(`Found email for ${founder.name}: ${email}`);
-                            }
-
-                            // Get phone directly from Prospeo
-                            const phoneResponse = await axios({
-                                method: 'post',
-                                url: 'https://api.prospeo.io/mobile-finder',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'X-KEY': PROSPEO_API_KEY
-                                },
-                                data: { url: founder.linkedinUrl }
-                            });
-
-                            if (phoneResponse.data?.error === false && phoneResponse.data?.response?.raw_format) {
-                                phone = phoneResponse.data.response.raw_format;
-                                console.log(`Found phone for ${founder.name}: ${phone}`);
-                            }
-                        } catch (error) {
-                            console.error(`Error fetching contact info for ${founder.name}:`, error.message);
-                            // Continue with next founder even if this one fails
-                        }
-                    }
-
-                    foundersWithContacts.push({
-                        ...founder,
-                        email,
-                        phone
-                    });
-                }
-
-                results.push({
-                    companyName: result.companyName,
-                    status: 'Completed',
-                    foundersData: foundersWithContacts
+                // Add result with error status but don't fail the whole job
+                job.results.push({
+                    companyName: company,
+                    foundersData: [{
+                        name: 'Not Found',
+                        role: 'Not Found',
+                        linkedinUrl: 'Not Found',
+                        email: 'Not Found',
+                        phone: 'Not Found'
+                    }],
+                    website: 'Not Found',
+                    yearFounded: 'Not Found',
+                    status: 'error',
+                    error: error.message
                 });
             }
 
-            processed++;
-            updateJobProgress(jobId, (processed / companies.length) * 100, results, company);
+            // Always update job status
+            jobs.set(jobId, { ...job });
+            
+            // Add a delay between companies to avoid rate limits
+            if (i < companies.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
         }
 
-        updateJobStatus(jobId, 'completed', results);
-        return results;
+        // Mark job as completed when finished
+        job.status = 'completed';
+        job.progress = 100;
+        jobs.set(jobId, { ...job });
+        console.log(`Job ${jobId} completed successfully`);
 
     } catch (error) {
-        console.error('Error processing companies:', error);
-        updateJobStatus(jobId, 'failed', results, error.message);
-        throw error;
+        console.error('Error in processCompanies:', error);
+        // Only mark the job as error if something catastrophic happens
+        // Individual company errors are already handled above
+        job.status = 'error';
+        job.error = error.message;
+        jobs.set(jobId, { ...job });
     }
 }
 
@@ -529,7 +604,20 @@ function updateJobStatus(jobId, status, results = [], error = null) {
 
 // Start server
 server.listen(process.env.PORT || 7501, () => {
-  console.log(`Server running on port ${process.env.PORT || 7501}`);
+  const port = process.env.PORT || 7501;
+  console.log('\n===========================================');
+  console.log(`InsightScout Server running on port ${port}`);
+  console.log('===========================================');
+  console.log('API Status:');
+  console.log(`- Perplexity API: ${PERPLEXITY_API_KEY ? '✅ Connected' : '❌ Not configured'}`);
+  console.log(`- GROQ API: ${GROQ_API_KEY ? '✅ Connected' : '❌ Not configured'}`);
+  console.log(`- Exa API: ${EXA_API_KEY ? '✅ Connected' : '❌ Not configured'}`);
+  console.log(`- Prospeo API: ${PROSPEO_API_KEY ? '✅ Connected' : '❌ Not configured'}`);
+  console.log('===========================================');
+  console.log('Server endpoints:');
+  console.log(`- Health check: http://localhost:${port}/api/health`);
+  console.log(`- Research start: http://localhost:${port}/api/research/start`);
+  console.log('===========================================\n');
 });
 
 app.post('/api/research', async (req, res) => {
@@ -551,7 +639,7 @@ app.post('/api/research', async (req, res) => {
         res.json({ jobId });
 
         // Process companies in background
-        processCompanies(companies, jobId).catch(error => {
+        processCompanies(jobId, companies).catch(error => {
             console.error('Error processing companies:', error);
             updateJobStatus(jobId, 'failed', [], error.message);
         });

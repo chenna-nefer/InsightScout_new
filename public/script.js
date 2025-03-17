@@ -1,13 +1,19 @@
 document.addEventListener('DOMContentLoaded', async function() {
-    // API Configuration
-    const API_BASE_URL = window.location.hostname.includes('localhost') 
-        ? 'http://localhost:7501'
-        : 'https://insightscout-new.onrender.com';
+    // Store the original HTML content
+    const originalHtml = document.body.innerHTML;
 
-    // DOM Elements with validation
+    // API Configuration
+    const API_BASE_URL = window.location.hostname.includes('127.0.0.1') 
+        ? 'http://localhost:7501'
+        : 'https://insightscout.onrender.com';
+
+    // Define elements object globally within the scope
     const elements = {};
-    
-    // Function to safely get DOM elements
+
+    // Add this at the top level
+    let progressInterval = null;
+
+    // Define the initialization function
     function initializeElements() {
         const requiredElements = {
             'file-input': 'fileInput',
@@ -42,23 +48,34 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Get input section using class
         elements.inputSection = document.querySelector('.input-section');
         if (!elements.inputSection) {
-            missingElements.push('input-section');
+            missingElements.push('input-section (class)');
         }
 
-        // If any elements are missing, throw error
+        // If any elements are missing, throw error with specific details
         if (missingElements.length > 0) {
             throw new Error(`Missing required DOM elements: ${missingElements.join(', ')}`);
         }
     }
 
     try {
-        // Check server health before initializing
-        const isServerHealthy = await checkServerHealth();
-        if (!isServerHealthy) {
-            throw new Error('Server is not responding correctly');
+        // Show loading state
+        document.body.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <h2>Connecting to server...</h2>
+                <p>Please wait...</p>
+            </div>
+        `;
+
+        // Check server health
+        const isHealthy = await checkServerHealth();
+        if (!isHealthy) {
+            throw new Error('Unable to connect to server');
         }
 
-        // Initialize elements and validate their existence
+        // Restore the original HTML content before initializing elements
+        document.body.innerHTML = originalHtml;
+
+        // Now initialize elements
         initializeElements();
         
         // State management
@@ -197,6 +214,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                     body: JSON.stringify({ companies })
                 });
 
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
                 // Log response details
                 console.log('Response status:', response.status);
                 console.log('Response headers:', Object.fromEntries(response.headers.entries()));
@@ -216,63 +237,60 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
 
                 currentJobId = data.jobId;
+                console.log('Received jobId:', data.jobId);
                 startProgressTracking(data.jobId);
 
             } catch (error) {
                 console.error('Error in handleCompanySearch:', error);
                 handleError(error);
+                elements.searchCompanyBtn.disabled = false;
             }
         }
 
         async function startProgressTracking(jobId) {
-            const interval = setInterval(async () => {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            
+            progressInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/api/research/status/${jobId}`, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json'
-                        },
-                        mode: 'cors'
-                    });
-
-                    const responseText = await response.text();
-                    console.log('Status response:', responseText);
-
-                    let data;
-                    try {
-                        data = JSON.parse(responseText);
-                    } catch (parseError) {
-                        console.error('Failed to parse status response:', parseError);
-                        clearInterval(interval);
+                    const response = await fetch(`${API_BASE_URL}/api/research/status/${jobId}`);
+                    
+                    if (response.status === 429) {
+                        // Rate limit hit, skip this check
                         return;
                     }
 
                     if (!response.ok) {
-                        throw new Error(data.error || 'Failed to get status');
+                        throw new Error(`Status check failed: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        throw new Error(data.error);
                     }
 
                     elements.progressBarFill.style.width = `${data.progress}%`;
                     
                     if (data.currentCompany) {
                         elements.currentCompanySpan.textContent = data.currentCompany;
-                        updateCompanyStatus(data.currentCompany, 'Researching...');
                     }
 
                     if (data.results && data.results.length > 0) {
-                        currentResults = data.results;
                         updateCompanyResults(data.results);
                     }
 
-                    if (data.status === 'completed') {
-                        clearInterval(interval);
-                        handleCompletion();
+                    if (data.status === 'completed' || data.status === 'error') {
+                        clearInterval(progressInterval);
+                        handleCompletion(data);
                     }
 
                 } catch (error) {
                     console.error('Error tracking progress:', error);
-                    clearInterval(interval);
+                    clearInterval(progressInterval);
                 }
-            }, 2000);
+            }, 2000); // Check every 2 seconds
         }
 
         function updateTableWithCompanies(companies) {
@@ -367,9 +385,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                     throw new Error('No companies loaded. Please load companies first.');
                 }
 
-                const reversedCompanies = [...loadedCompanies].reverse();
+                // Use companies in their original order (not reversed)
                 elements.startResearchBtn.style.display = 'none';
-                await handleCompanySearch(reversedCompanies);
+                await handleCompanySearch(loadedCompanies);
 
             } catch (error) {
                 handleError(error);
@@ -489,7 +507,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }
 
-        function handleCompletion() {
+        function handleCompletion(data) {
             elements.progressSection.style.display = 'none';
             elements.inputSection.style.display = 'block';
             elements.resultsSection.style.display = 'block';
@@ -497,17 +515,66 @@ document.addEventListener('DOMContentLoaded', async function() {
             elements.progressBarFill.style.backgroundColor = '#4CAF50';
         }
 
-        // Add this helper function to check server health
+        // Update health check function
         async function checkServerHealth() {
             try {
-                const response = await fetch(`${API_BASE_URL}/health`);
-                const data = await response.json();
-                console.log('Server health check:', data);
-                return data.status === 'ok';
+                console.log('Checking server health...');
+                const response = await fetch(`${API_BASE_URL}/api/health`);
+                
+                if (!response.ok) {
+                    console.error('Health check failed:', response.status, response.statusText);
+                    return false;
+                }
+
+                const text = await response.text();
+                console.log('Health check response:', text);
+
+                try {
+                    const data = JSON.parse(text);
+                    return data.status === 'ok';
+                } catch (parseError) {
+                    console.error('Failed to parse health check response:', parseError);
+                    return false;
+                }
             } catch (error) {
-                console.error('Server health check failed:', error);
+                console.error('Health check error:', error);
                 return false;
             }
+        }
+
+        // Add cleanup
+        window.addEventListener('beforeunload', () => {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+        });
+
+        // Add this function to handle API errors
+        function handleApiError(error, company) {
+            console.error(`Error processing ${company}:`, error);
+            
+            let errorMessage = 'An unexpected error occurred.';
+            if (error.response) {
+                if (error.response.status === 400) {
+                    errorMessage = 'Invalid request. Please check the company name.';
+                } else if (error.response.status === 401) {
+                    errorMessage = 'API authentication failed. Please check API keys.';
+                } else if (error.response.status === 429) {
+                    errorMessage = 'API rate limit exceeded. Please try again later.';
+                }
+            }
+
+            return {
+                companyName: company,
+                foundersData: [{
+                    name: 'Error',
+                    role: errorMessage,
+                    linkedinUrl: 'Not Found',
+                    email: 'Not Found',
+                    phone: 'Not Found'
+                }],
+                status: 'error'
+            };
         }
     } catch (error) {
         console.error('Initialization error:', error);
@@ -515,7 +582,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             <div style="color: red; padding: 20px; text-align: center;">
                 <h2>Error Initializing Application</h2>
                 <p>${error.message}</p>
-                <button onclick="location.reload()">Retry</button>
+                <p style="font-size: 0.9em; margin-top: 10px;">Please ensure all required HTML elements are present.</p>
+                <button onclick="location.reload()" 
+                        style="padding: 10px 20px; margin-top: 20px; cursor: pointer;">
+                    Retry
+                </button>
             </div>
         `;
     }

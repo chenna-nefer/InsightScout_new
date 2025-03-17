@@ -258,6 +258,7 @@ textarea {
 }
 
 #search-company {
+    white-space: nowrap;
     background-color: var(--primary-color);
 }
 
@@ -274,4 +275,51 @@ textarea {
 /* Add visual separation between different companies */
 .results-grid tr:not(:first-child) td:first-child:empty {
     border-top: none;
+}
+
+.single-company-search {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 1rem;
+}
+
+.single-company-search input {
+    flex: 1;
+    padding: 0.8rem;
+    border: 1px solid var(--secondary-color);
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.divider {
+    text-align: center;
+    position: relative;
+    margin: 20px 0;
+}
+
+.divider:before,
+.divider:after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 45%;
+    height: 1px;
+    background-color: #ddd;
+}
+
+.divider:before {
+    left: 0;
+}
+
+.divider:after {
+    right: 0;
+}
+
+.divider span {
+    display: inline-block;
+    padding: 0 10px;
+    background-color: white;
+    position: relative;
+    color: var(--secondary-color);
+    font-weight: bold;
 }

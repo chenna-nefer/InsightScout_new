@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CompanyScope - Company Research Tool</title>
+    <title>Insight Squat - Company Research Tool</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <header>
-        <h1>CompanyScope</h1>
+        <h1>Insight Squat</h1>
         <p>Research Companies & Founders Instantly</p>
     </header>
 
@@ -16,13 +16,14 @@
         <div class="input-section">
             <h2>Start Your Research</h2>
             
-            <!-- Add company name input section -->
-            <div class="company-input">
+            <div class="single-company-search">
                 <input type="text" id="company-name-input" placeholder="Enter company name">
-                <button class="button" id="search-company">Search Company</button>
+                <button id="search-company" class="button">Search Company</button>
             </div>
             
-            <div class="or-divider">OR</div>
+            <div class="divider">
+                <span>OR</span>
+            </div>
             
             <div class="file-upload" onclick="document.getElementById('file-input').click()">
                 <input type="file" id="file-input" hidden accept=".xlsx,.csv">
@@ -30,23 +31,25 @@
                 <p>or click to browse</p>
             </div>
             
-            <button class="button" id="start-research">Start Research</button>
+            <button id="start-research" class="button">Start Research</button>
+            <button id="cancel-research" class="button">Cancel</button>
+            <button id="download-results" class="button">Download Results</button>
+            <button id="start-new" class="button">Start New Research</button>
         </div>
 
-        <div class="progress-section" id="progress-section">
+        <div id="progress-section" class="progress-section">
             <h2>Research in Progress</h2>
-            <p class="status-text">Processing: <span id="current-company">-</span></p>
             <div class="progress-bar">
-                <div class="progress-bar-fill" id="progress-bar-fill"></div>
+                <div id="progress-bar-fill" class="progress-bar-fill"></div>
             </div>
-            <button class="button" id="cancel-research">Cancel</button>
+            <span id="current-company">-</span>
         </div>
 
-        <div class="results-section" id="results-section">
-            <div class="results-summary">
-                <p>Total Companies: <span id="total-companies">0</span></p>
-                <p>Founders Found: <span id="total-founders">0</span></p>
-                <p>LinkedIn Profiles: <span id="total-linkedin">0</span></p>
+        <div id="results-section" class="results-section">
+            <div class="summary">
+                <span>Total Companies: <span id="total-companies">0</span></span>
+                <span>Total Founders: <span id="total-founders">0</span></span>
+                <span>LinkedIn Profiles: <span id="total-linkedin">0</span></span>
             </div>
             <div class="button-group" id="button-group">
                 <button class="button" id="download-results">Download Results</button>
