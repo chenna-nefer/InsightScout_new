@@ -328,12 +328,19 @@ app.post('/api/research/cancel/:jobId', (req, res) => {
     return res.status(404).json({ error: 'Job not found' });
   }
   
-  // Mark job as cancelled
+  console.log(`Cancelling job ${jobId}`);
+  
+  // Mark job as cancelled consistently
   job.isCancelled = true;
   job.status = 'cancelled';
   
+  // Update the job in the map
+  jobs.set(jobId, job);
+  
   // Remove from active jobs
   activeJobs.delete(jobId);
+  
+  console.log(`Job ${jobId} marked as cancelled`);
   
   res.json({ message: 'Research cancelled successfully' });
 });
@@ -498,7 +505,14 @@ async function processCompanies(jobId, companies) {
 
     try {
         for (let i = 0; i < companies.length; i++) {
-            if (job.status === 'cancelled') break;
+            // Get the latest job status at the start of each loop
+            const currentJob = jobs.get(jobId);
+            
+            // Check if job was cancelled (using both properties)
+            if (currentJob.status === 'cancelled' || currentJob.isCancelled === true) {
+                console.log(`Job ${jobId} was cancelled, stopping processing`);
+                break;
+            }
 
             const company = companies[i];
             console.log(`Processing company ${i + 1}/${totalCompanies}: ${company}`);
@@ -508,13 +522,37 @@ async function processCompanies(jobId, companies) {
             jobs.set(jobId, { ...job });
 
             try {
-                // Process with timeout safety
+                // Create a cancelable promise
+                const processingPromise = researchCompany(company);
+                
+                // Process with timeout safety and cancellation checks
                 const result = await Promise.race([
-                    researchCompany(company),
+                    processingPromise,
                     new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Research timeout after 60 seconds')), 60000)
-                    )
+                    ),
+                    // Add another promise that checks for cancellation every second
+                    new Promise((_, reject) => {
+                        const cancelCheckInterval = setInterval(() => {
+                            const updatedJob = jobs.get(jobId);
+                            if (updatedJob.status === 'cancelled' || updatedJob.isCancelled === true) {
+                                clearInterval(cancelCheckInterval);
+                                reject(new Error('Job was cancelled'));
+                            }
+                        }, 1000);
+                        
+                        // Clear the interval if the promise resolves through other means
+                        processingPromise.then(() => clearInterval(cancelCheckInterval))
+                                       .catch(() => clearInterval(cancelCheckInterval));
+                    })
                 ]);
+
+                // Check again if job was cancelled
+                const updatedJob = jobs.get(jobId);
+                if (updatedJob.status === 'cancelled' || updatedJob.isCancelled === true) {
+                    console.log(`Job ${jobId} was cancelled during processing of ${company}`);
+                    break;
+                }
 
                 console.log(`Research result for ${company}:`, result);
 
@@ -529,6 +567,12 @@ async function processCompanies(jobId, companies) {
 
             } catch (error) {
                 console.error(`Error processing company ${company}:`, error);
+                
+                // Check if the error was due to cancellation
+                if (error.message === 'Job was cancelled') {
+                    console.log(`Stopping job ${jobId} due to cancellation`);
+                    break;
+                }
                 
                 // Add result with error status but don't fail the whole job
                 job.results.push({
@@ -547,16 +591,39 @@ async function processCompanies(jobId, companies) {
                 });
             }
 
+            // Check again if job was cancelled
+            const afterProcessingJob = jobs.get(jobId);
+            if (afterProcessingJob.status === 'cancelled' || afterProcessingJob.isCancelled === true) {
+                console.log(`Job ${jobId} was cancelled after processing ${company}`);
+                break;
+            }
+
             // Always update job status
             jobs.set(jobId, { ...job });
             
             // Add a delay between companies to avoid rate limits
             if (i < companies.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Check for cancellation during the delay
+                const delayedJob = jobs.get(jobId);
+                if (delayedJob.status === 'cancelled' || delayedJob.isCancelled === true) {
+                    console.log(`Job ${jobId} was cancelled during delay after ${company}`);
+                    break;
+                }
             }
         }
 
-        // Mark job as completed when finished
+        // Get final job state to determine what to do next
+        const finalJob = jobs.get(jobId);
+        
+        // If the job was cancelled, maintain the cancelled status
+        if (finalJob.status === 'cancelled' || finalJob.isCancelled === true) {
+            console.log(`Job ${jobId} completed processing with cancelled status`);
+            return;
+        }
+
+        // Mark job as completed when finished normally
         job.status = 'completed';
         job.progress = 100;
         jobs.set(jobId, { ...job });
@@ -564,11 +631,17 @@ async function processCompanies(jobId, companies) {
 
     } catch (error) {
         console.error('Error in processCompanies:', error);
-        // Only mark the job as error if something catastrophic happens
-        // Individual company errors are already handled above
-        job.status = 'error';
-        job.error = error.message;
-        jobs.set(jobId, { ...job });
+        
+        // Get current job status
+        const errorJob = jobs.get(jobId);
+        
+        // Only mark as error if not already cancelled
+        if (errorJob.status !== 'cancelled' && errorJob.isCancelled !== true) {
+            // Individual company errors are already handled above
+            job.status = 'error';
+            job.error = error.message;
+            jobs.set(jobId, { ...job });
+        }
     }
 }
 

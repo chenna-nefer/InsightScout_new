@@ -91,6 +91,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         elements.startResearchBtn.parentNode.insertBefore(loadDataBtn, elements.startResearchBtn);
         elements.startResearchBtn.style.display = 'none';
 
+        // Hide duplicate download/new buttons in the button group
+        if (document.querySelector('#button-group')) {
+            document.querySelector('#button-group').style.display = 'none';
+        }
+
         // Event Listeners
         loadDataBtn.addEventListener('click', () => elements.fileInput.click());
         elements.fileInput.addEventListener('change', handleFileUpload);
@@ -278,6 +283,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
 
                     if (data.results && data.results.length > 0) {
+                        // Store current results for download functionality
+                        currentResults = data.results;
                         updateCompanyResults(data.results);
                     }
 
@@ -402,14 +409,33 @@ document.addEventListener('DOMContentLoaded', async function() {
                     });
 
                     if (!response.ok) throw new Error('Failed to cancel research');
+                    
+                    // Clear the progress tracking interval
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
 
+                    // Update UI to show canceled state
+                    elements.progressBarFill.style.width = '100%';
                     elements.progressBarFill.style.backgroundColor = '#ff4444';
                     elements.currentCompanySpan.textContent = 'Research cancelled';
+                    
+                    // Show correct sections
                     elements.progressSection.style.display = 'none';
                     elements.inputSection.style.display = 'block';
-                    elements.resultsSection.style.display = 'block';
                     
+                    if (currentResults && currentResults.length > 0) {
+                        elements.resultsSection.style.display = 'block';
+                    } else {
+                        elements.resultsSection.style.display = 'none';
+                    }
+                    
+                    // Reset state
                     currentJobId = null;
+                    
+                    console.log('Research canceled successfully');
+                    
                 } catch (error) {
                     console.error('Error cancelling research:', error);
                     alert('Failed to cancel research. Please try again.');
@@ -513,6 +539,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             elements.resultsSection.style.display = 'block';
             elements.currentCompanySpan.textContent = 'Research completed!';
             elements.progressBarFill.style.backgroundColor = '#4CAF50';
+            
+            // Make sure we have the final results for download
+            if (data.results && data.results.length > 0) {
+                currentResults = data.results;
+            }
         }
 
         // Update health check function
