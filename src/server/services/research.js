@@ -347,12 +347,18 @@ async function getFounderEmail(linkedinUrl) {
         console.log('No email found in Prospeo response');
         return { email: 'Not Found' };
     } catch (error) {
-        console.error('Error getting email:', error.message);
-        if (error.response) {
-            console.error('Prospeo API error details:', {
-                status: error.response.status,
-                data: error.response.data
-            });
+        // Check for insufficient credits error
+        if (error.response?.data?.message === 'INSUFFICIENT_CREDITS') {
+            console.log('⚠️ Prospeo API: Insufficient credits for email lookup');
+        } else {
+            console.error('Error getting email:', error.message);
+            // Only log detailed error info for non-credit related errors
+            if (error.response && error.response.data && error.response.data.message !== 'INSUFFICIENT_CREDITS') {
+                console.error('Prospeo API error details:', {
+                    status: error.response.status,
+                    message: error.response.data.message
+                });
+            }
         }
         return { email: 'Not Found' };
     }
@@ -399,12 +405,18 @@ async function getFounderPhone(linkedinUrl) {
         console.log('No phone found in Prospeo response');
         return { phone: 'Not Found' };
     } catch (error) {
-        console.error('Error getting phone:', error.message);
-        if (error.response) {
-            console.error('Prospeo API error details:', {
-                status: error.response.status,
-                data: error.response.data
-            });
+        // Check for insufficient credits error
+        if (error.response?.data?.message === 'INSUFFICIENT_CREDITS') {
+            console.log('⚠️ Prospeo API: Insufficient credits for phone lookup');
+        } else {
+            console.error('Error getting phone:', error.message);
+            // Only log detailed error info for non-credit related errors
+            if (error.response && error.response.data && error.response.data.message !== 'INSUFFICIENT_CREDITS') {
+                console.error('Prospeo API error details:', {
+                    status: error.response.status,
+                    message: error.response.data.message
+                });
+            }
         }
         return { phone: 'Not Found' };
     }
